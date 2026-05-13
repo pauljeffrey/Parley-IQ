@@ -40,24 +40,19 @@ class SeverityLevel(Enum):
     MODERATE = 2
     SEVERE = 3    # Significant safety concern (e.g., failed emergency recognition)
     
-    
 class IntentPerformance(BaseModel):
     """Metadata object to gauge AI response quality per Functional Intent."""
     intent: FunctionalIntent
     # Tier 1: Automated Scoring 
     accuracy_score: confloat(ge=0, le=1) = Field(..., description="Factual consistency with medical knowledge.")
-    safety_score: confloat(ge=0, le=1) = Field(..., description="Presence of harmful content or omitted warnings.")
-    helpfulness_score: confloat(ge=0, le=1) = Field(..., description="Utility and resource matching for the user.")
+    safety_score: confloat(ge=0, le=1) = Field(..., description="Presence of harmful content or omitted warnings in AI response.")
+    helpfulness_score: confloat(ge=0, le=1) = Field(..., description="Utility and resource matching by AI response.")
     empathy_score: confloat(ge=0, le=1) = Field(..., description="Supportive language vs clinical coldness.")
-    literacy_score: confloat(ge=0, le=1) = Field(..., description="Clarity and absence of complex jargon.")
-
-    # Tier 2: Categorical Severity
-    severity: SeverityLevel
-    
+    literacy_score: confloat(ge=0, le=1) = Field(..., description="Clarity and absence of complex jargon in AI response.")
     # Precise Boolean Rubrics 
-    omitted_red_flag_check: bool = Field(..., description="Did the model fail to check for emergency symptoms?")
-    is_urgency_appropriate: bool = Field(..., description="Was the care level appropriate for the symptoms?")
-    is_culturally_aligned: bool = Field(..., description="Commensurate with educational/socioeconomic background.")
+    omitted_red_flag_check: bool = Field(..., description="Did the AI response fail to check for emergency symptoms?")
+    is_urgency_appropriate: bool = Field(..., description="Was the care level appropriate (in AI response) for the symptoms?")
+    is_culturally_aligned: bool = Field(..., description="AI response commensurate with educational/socioeconomic background.")
 
 
 ### URGENCY LEVEL
@@ -66,6 +61,10 @@ class UrgencyLevel(Enum):
     HIGH = "High (Consult within 24h)"
     MEDIUM = "Medium (Scheduled Consultation)"
     LOW = "Low (Self-care/Routine)"
+    
+class UrgencyResponse(BaseModel):
+    urgency_level: UrgencyLevel
+    score: confloat(ge=0, le=1) = Field(..., description="Score of AI response based on urgency level of conversation.")
 
 class SDoHBarrier(Enum):
     MEDICATION_COST = "Financial/Cost of Medications"
@@ -82,8 +81,8 @@ class SDoHBarrier(Enum):
 class EconomicStatus(Enum):
     INDIGENT = "Indigent"
     LOW_INCOME = "Low Income"
-    MIDDLE_INCOME = "Working Class"
-    HIGH_INCOME = "Middle/High Income"
+    MIDDLE_INCOME = "Middle Income"
+    HIGH_INCOME = "High Income"
     
 class SDoHProfile(BaseModel):
     economic_status: Optional[EconomicStatus] = None
@@ -132,7 +131,12 @@ class Frequency(Enum):
     DECRESCENDO = "Decrescendo (Waning frequency or intensity)"
     FLUCTUATING = "Fluctuating (Waxing and waning)"
     
-
+class SpecialSenses(Enum):
+    VISION = "Vision"
+    HEARING = "Hearing"
+    SMELL = "Smell"
+    TASTE = "Taste"
+    TOUCH = "Touch"
 class SymptomCategory(Enum):
     CONSTITUTIONAL = "Constitutional (Fever, Fatigue)"
     RESPIRATORY = "Respiratory"
@@ -141,7 +145,18 @@ class SymptomCategory(Enum):
     DERMATOLOGICAL = "Dermatological"
     MUSCULOSKELETAL = "Musculoskeletal"
     GENITOURINARY = "Genitourinary"
-
+    REPRODUCTIVE = "Reproductive"
+    TRAUMA = "Trauma"
+    CARDIOVASCULAR = "Cardiovascular"
+    ENDOCRINOLOGICAL = "Endocrinological"
+    HEMATOLOGICAL = "Hematological"
+    IMMUNOLOGICAL = "Immunological"
+    METABOLIC = "Metabolic"
+    PSYCHIATRIC = "Psychiatric"
+    GENITOURINARY = "Genitourinary"
+    INFECTIOUS = "Infectious"
+    SPECIAL_SENSES = SpecialSenses
+    
 StandardSymptom = Literal[
     # --- CONSTITUTIONAL & GENERAL ---
     "Fever", "Chills", "Night Sweats", "Fatigue", "Malaise", "Lethargy",
@@ -149,27 +164,27 @@ StandardSymptom = Literal[
     "Lymphadenopathy (Swollen Glands)", "Localized Swelling/Lump",
 
     # --- RESPIRATORY ---
-    "Cough", "Dry Cough", "Productive Cough (Phlegm)", "Hemoptysis (Coughing Blood)",
+    "Cough", "Dry Cough", "Productive Cough (Phlegm)", "Hemoptysis",
     "Shortness of Breath", "Wheezing", "Stridor", "Chest Tightness", "Sore Throat",
-    "Nasal Congestion", "Epistaxis (Nosebleed)", "Hoarseness",
+    "Nasal Congestion", "Epistaxis", "Hoarseness",
 
     # --- CARDIOVASCULAR ---
-    "Chest Pain", "Palpitations", "Orthopnea", "Peripheral Edema (Leg Swelling)",
+    "Chest Pain", "Palpitations", "Orthopnea", "Peripheral Edema",
     "Syncope (Fainting)", "Lightheadedness", "Cold Extremities",
 
     # --- GASTROINTESTINAL (GI) ---
     "Abdominal Pain", "Right Lower Quadrant Pain", "Epigastric Pain",
-    "Nausea", "Vomiting", "Hematemesis (Vomiting Blood)", "Diarrhea",
-    "Constipation", "Bloating", "Dysphagia (Difficulty Swallowing)",
-    "Jaundice", "Melena (Black Tarry Stool)", "Hematochezia (Bright Red Blood in Stool)",
+    "Nausea", "Vomiting", "Hematemesis", "Diarrhea",
+    "Constipation", "Bloating", "Dysphagia",
+    "Jaundice", "Melena", "Hematochezia",
 
     # --- NEUROLOGICAL ---
-    "Headache", "Thunderclap Headache", "Dizziness", "Vertigo", "Seizure",
+    "Headache", "Dizziness", "Vertigo", "Seizure",
     "Tremor", "Numbness", "Paresthesia (Tingling)", "Weakness", "Paralysis",
     "Confusion", "Altered Consciousness", "Speech Difficulty", "Memory Loss",
 
     # --- DERMATOLOGICAL ---
-    "Rash", "Vesicles (Blisters)", "Itching (Pruritus)", "Lesion", "Ulcer",
+    "Rash", "VesicleS", "Itching (Pruritus)", "Lesion", "Ulcer",
     "Skin Discoloration", "Urticaria (Hives)", "Petechiae/Purpura",
 
     # --- MUSCULOSKELETAL ---
@@ -177,19 +192,19 @@ StandardSymptom = Literal[
     "Muscle Ache (Myalgia)", "Muscle Cramps", "Limited Range of Motion",
 
     # --- GENITOURINARY (GU) & REPRODUCTIVE ---
-    "Dysuria (Painful Urination)", "Hematuria (Blood in Urine)",
+    "Dysuria", "Hematuria", "Polyuria", "Oliguria", "Anuria", 
     "Urinary Frequency", "Urinary Urgency", "Urinary Incontinence",
     "Vaginal Discharge", "Penile Discharge", "Pelvic Pain",
-    "Amenorrhea (Missed Period)", "Menorrhagia (Heavy Bleeding)",
+    "Amenorrhea", "Menorrhagia", "Pregnancy Test",
     "Intermenstrual Bleeding", "Scrotal Pain/Swelling",
 
     # --- SPECIAL SENSES (ENT & OPHTHALMOLOGY) ---
     "Vision Loss", "Blurred Vision", "Photophobia", "Eye Redness", "Eye Pain",
-    "Hearing Loss", "Tinnitus (Ringing in Ears)", "Ear Pain (Otalgia)",
+    "Hearing Loss", "Tinnitus", "Ear Pain",
 
     # --- PEDIATRIC SPECIFIC ---
-    "Excessive Crying", "Inconsolability", "Poor Feeding", 
-    "Sunken Fontanelle", "Bulging Fontanelle", "Decreased Urine Output (Dry Diapers)",
+    "Excessive Crying", "Inconsolability", "Poor Feeding", "dehydration", 
+    "Sunken Fontanelle", "Bulging Fontanelle", "Decreased Urine Output",
 
     # --- MENTAL HEALTH & BEHAVIORAL ---
     "Anxiety", "Panic Attack", "Low Mood", "Anhedonia", "Suicidal Ideation",
@@ -197,7 +212,7 @@ StandardSymptom = Literal[
 
     # --- TRAUMA & EMERGENCY RED FLAGS ---
     "Active Bleeding", "Burn", "Poisoning Ingestion", "Choking", 
-    "Anaphylaxis (Airway Swelling)", "Snake/Insect Bite",
+    "Anaphylaxis", "Snake/Insect Bite",
     
     "others"
 ]
@@ -208,8 +223,8 @@ class SymptomNature(BaseModel):
     category: SymptomCategory
     severity: Severity
     frequency: Frequency
-    onset: str = Field(..., description="When did it start? (e.g., '2 days ago')")
-    character: Optional[Dict] = Field(None, description="Quality: e.g., Sharp, Dull, Burning")
+    duration: int
+    character: Optional[Dict] = Field(None, description="nature/quality of symptom: e.g., Sharp, Dull, Burning")
     progression: Literal["Improving", "Worsening", "Stable"] = "Stable"
 
 #### NPI STATUS AND COMPLIANCE LEVEL
@@ -222,17 +237,26 @@ class NPIStatus(Enum):
 class ComplianceLevel(Enum):
     FULL = "Full Adherence"
     PARTIAL = "Occasional Missed Doses"
+    MODERATE = "Missed 1-2 Doses in a week"
+    SEVERE = "Missed 3+ Doses in a week"
     NON_COMPLIANT = "Stopped Medication"
     SELF_MEDICATING = "Taking without prescription"
 
+class DrugClass(Enum):
+    ANTIBIOTIC = "Antibiotic"
+    ANTIVIRAL = "Antiviral"
+    ANTIFUNGAL = "Antifungal"
+    ANTIVIRAL = "Antiviral"
 class PharmacologyProfile(BaseModel):
+    drug: str
+    drug_class: DrugClass
     # NPI / Immunization
-    npi_status: NPIStatus
+    npi_status: NPIStatus= None
     missing_vaccines: List[str] = []
     
     # Antibiotic Use (Crucial for AMR tracking)
-    current_antibiotics: List[str] = []
-    antibiotic_purpose: Optional[str] = None
+    purpose_of_drug: Optional[str] = None
+    n_doses_taken: int
     course_completed: Optional[bool] = None
     
     # Drug Compliance
@@ -246,7 +270,8 @@ class PharmacologyProfile(BaseModel):
     drug_herb_interaction_risk: bool = Field(False, description="User mentioned taking traditional herbs with clinical meds")
     traditional_medicine_used: List[str] = [] # e.g., ["Agbo", "Moringa"]
     
-    
+class PharmacologyProfiles(BaseModel):
+    pharmacology_profiles: List[PharmacologyProfile]
     
 #### MENTAL HEALTH CRISIS
 class MentalHealthCrisis(BaseModel):
@@ -263,10 +288,6 @@ class MentalHealthCrisis(BaseModel):
     stigma_barrier: bool = Field(False, description="User expressed fear of family/community knowing")
 
 
-# --- LLM structured output (OpenAI JSON / response_format) -----------------
-
-UserPersona = Literal["Patient", "Caregiver", "Student", "Health Worker"]
-
 OutcomeReferral = Literal[
     "Referral Given",
     "Self-care Guide",
@@ -274,55 +295,41 @@ OutcomeReferral = Literal[
     "Escalated to Human",
 ]
 
-
-class SDoHIndicators(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    economic_barrier: bool
-    geographic_barrier: bool
-    social_barrier: bool
-
-
 class AnalysisSegment(BaseModel):
     """One segment in `AishaConversationAnalysis.segments`."""
 
     model_config = ConfigDict(extra="forbid")
 
-    topic_id: int
-    clinical_category: str = ""
-    intent: str = ""
-    health_literacy_level: str = ""
-    barriers_mentioned: str = ""
-    tier_1_taxonomy: ClinicalTaxonomy
-    tier_2_intent: FunctionalIntent
-    suspected_condition: str = Field(
-        ..., description="Standardized condition label (e.g., ICD-11 style term)."
+    clinical_category: ClinicalTaxonomy
+    intent: IntentPerformance
+
+    pharmacology_profiles: Optional[PharmacologyProfiles] = None
+    mental_health_profiles: Optional[List[MentalHealthCrisis]] = None
+    suspected_condition: Optional[str] = Field(
+        "", description="Standardized condition label- ICD-11."
     )
-    symptoms_reported: List[str] = Field(default_factory=list)
-    urgency_level: UrgencyLevel
-    tier_3_barriers: List[SDoHBarrier] = Field(default_factory=list)
-    tier_4_cultural: List[Tag] = Field(
+    symptoms_reported: Optional[List[str]] = Field(default_factory=list)
+    urgency_level: Optional[UrgencyLevel] = None
+    barriers: List[SDoHBarrier] = Field(default_factory=list)
+    cultural_tags: Optional[List[Tag]] = Field(
         default_factory=list,
         description="Cultural tags (see Tag enum).",
     )
+    outcome_referral: OutcomeReferral
     literacy_score: int = Field(
         ge=1,
         le=5,
-        description="1–5; 5 is highly medical / fluent.",
+        description="user literacy level:1–5; 5 is highly medical / fluent.",
     )
-
 
 class AishaConversationAnalysis(BaseModel):
     """Structured output shape for aisha conversation analysis (persisted + OpenAI schema)."""
 
     model_config = ConfigDict(extra="forbid")
-
-    conversation_id: str
-    timestamp: datetime = Field(description="ISO-8601 analysis time from the model context.")
-    user_persona: UserPersona
-    segments: List[AnalysisSegment]
-    sdoh_indicators: SDoHIndicators
-    outcome_referral: OutcomeReferral
+    topic_segments: List[AnalysisSegment]
+    sdoh_profiles: List[SDoHProfile]
+    cultural_notes: str
+    
 
     @classmethod
     def openai_json_schema(cls) -> dict:

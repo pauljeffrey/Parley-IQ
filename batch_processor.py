@@ -10,7 +10,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, List, Iterator, Mapping, MutableMapping, Optional, Sequence
 
 from openai import OpenAI
 from sqlalchemy.engine import Engine
@@ -70,11 +70,11 @@ class ConversationJob:
 
     session_id: str
     user_phone: str
-    transcript: str
+    transcript: List[ConsultationTurn]
 
     @property
     def custom_id(self) -> str:
-        return f"aisha_session_{self.session_id}"
+        return f"session_{self.session_id}"
 
 
 def format_transcript(turns: Sequence[ConsultationTurn]) -> str:
