@@ -1,0 +1,13 @@
+pydantic>=2
+sqlalchemy>=2
+pymysql
+psycopg[binary]>=3
+python-dotenv
+openai>=1.0.0
+pydantic-ai
+matplotlib
+pandas
+numpy
+fastapi
+uvicorn[standard]
+python-multipart
