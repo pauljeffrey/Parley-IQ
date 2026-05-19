@@ -610,13 +610,18 @@ def poll_shards_and_persist(
 def run_sharded_batch_pipeline(
     engine: Engine,
     *,
+    session_ids: Sequence[int] | None = None,
     wait: bool = True,
     poll_interval_sec: float = 15.0,
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """Build shards, submit all OpenAI batches, persist each shard as it completes."""
     skip = completed_session_ids(engine)
-    ids = collect_pending_session_ids(engine)
+    ids = (
+        [int(i) for i in session_ids]
+        if session_ids is not None
+        else collect_pending_session_ids(engine)
+    )
     since = batch_conversation_since()
     log(f"Skipping {len(skip)} completed/analyzed session(s); pending: {len(ids)}")
     if since:
