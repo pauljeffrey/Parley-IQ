@@ -183,19 +183,26 @@ def completed_session_ids(engine: Engine) -> set[str]:
     return done
 
 
-def collect_pending_session_ids(engine: Engine) -> list[int]:
+def collect_pending_session_ids(engine: Engine) -> list[int | str]:
     ids = fetch_all_session_ids(
         engine=engine,
         min_turns=min_conversation_turns(),
         since=batch_conversation_since(),
     )
     skip = completed_session_ids(engine)
-    ids = [int(i) for i in ids if str(i) not in skip]
+    
+    def _to_int_or_str(val: Any) -> int | str:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return str(val or "")
+            
+    ids = [_to_int_or_str(i) for i in ids if str(i) not in skip]
     cap = batch_max_sessions()
     return ids[:cap] if cap is not None else ids
 
 
-def _chunks(items: Sequence[int], size: int) -> Iterator[list[int]]:
+def _chunks(items: Sequence[int | str], size: int) -> Iterator[list[int | str]]:
     for i in range(0, len(items), size):
         yield list(items[i : i + size])
 
@@ -474,7 +481,7 @@ def _shard_paths(work: Path, index: int) -> tuple[Path, Path, Path, Path]:
     return d / "input.jsonl", d / "output.jsonl", d / "errors.jsonl", d / "meta.json"
 
 
-def build_shards(engine: Engine, session_ids: Sequence[int]) -> list[BatchShard]:
+def build_shards(engine: Engine, session_ids: Sequence[int | str]) -> list[BatchShard]:
     shards: list[BatchShard] = []
     work = batch_work_dir()
     work.mkdir(parents=True, exist_ok=True)

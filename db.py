@@ -23,22 +23,6 @@ from sqlalchemy.engine import Engine
 
 from output import ConversationAnalysis, SDoHBarrier, SDoHProfile
 
-COLUMN_ID = "id"
-COLUMN_USER_ID = "user_id"
-COLUMN_SESSION_ID = "session_id"
-COLUMN_USER_MESSAGE = "user_message"
-COLUMN_ASSISTANT_MESSAGE = "assistant_message"
-COLUMN_CREATED_AT = "created_at"
-
-
-class DatabaseBackend(str, Enum):
-    MYSQL = "mysql"
-    POSTGRESQL = "postgresql"
-
-
-class DBError(RuntimeError):
-    """Raised when configuration is invalid or the driver/backend does not match."""
-
 
 def _load_dotenv_if_available() -> None:
     try:
@@ -52,6 +36,22 @@ def _load_dotenv_if_available() -> None:
 
 
 _load_dotenv_if_available()
+
+COLUMN_ID = os.environ.get("DB_COLUMN_ID", "id")
+COLUMN_USER_ID = os.environ.get("DB_COLUMN_USER_ID", "user_id")
+COLUMN_SESSION_ID = os.environ.get("DB_COLUMN_SESSION_ID", "session_id")
+COLUMN_USER_MESSAGE = os.environ.get("DB_COLUMN_USER_MESSAGE", "user_message")
+COLUMN_ASSISTANT_MESSAGE = os.environ.get("DB_COLUMN_ASSISTANT_MESSAGE", "assistant_message")
+COLUMN_CREATED_AT = os.environ.get("DB_COLUMN_CREATED_AT", "created_at")
+
+
+class DatabaseBackend(str, Enum):
+    MYSQL = "mysql"
+    POSTGRESQL = "postgresql"
+
+
+class DBError(RuntimeError):
+    """Raised when configuration is invalid or the driver/backend does not match."""
 
 SCHEMA_NAME = os.environ.get("DB_SCHEMA", "public")
 CONVERSATION_TABLE_NAME = os.environ.get("CONVERSATION_TABLE", "user_consultation")
@@ -164,6 +164,78 @@ def qualified_table_name(engine: Engine, table: Optional[str] = None) -> str:
     return f'"{schema}"."{tbl}"'
 
 
+def create_analysis_table_if_not_exists(engine: Engine) -> None:
+    """Create the analysis table in the configured schema if it does not already exist."""
+    schema = _safe_ident_fragment(SCHEMA_NAME)
+    tbl = _safe_ident_fragment(ANALYSIS_TABLE_NAME)
+    if engine.dialect.name == "mysql":
+        qualified = f"`{schema}`.`{tbl}`"
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {qualified} (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            session_id BIGINT,
+            user_phone VARCHAR(255),
+            model_name VARCHAR(255),
+            segment_index INT,
+            clinical_category VARCHAR(255),
+            intent JSON,
+            pharmacology_profiles JSON,
+            mental_health_profiles JSON,
+            suspected_condition JSON,
+            symptoms_reported JSON,
+            urgency_level VARCHAR(255),
+            barriers JSON,
+            cultural_tags JSON,
+            outcome_referral VARCHAR(255),
+            literacy_score INT,
+            cultural_notes TEXT,
+            sdoh_profiles JSON,
+            sdoh_economic_barrier BOOLEAN,
+            sdoh_geographic_barrier BOOLEAN,
+            sdoh_social_barrier BOOLEAN,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            analysis_timestamp TIMESTAMP NULL,
+            conversation_day_of_week VARCHAR(255),
+            conversation_month INT,
+            conversation_year INT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """
+    else:
+        qualified = f'"{schema}"."{tbl}"'
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {qualified} (
+            id BIGSERIAL PRIMARY KEY,
+            session_id BIGINT,
+            user_phone TEXT,
+            model_name TEXT,
+            segment_index INT,
+            clinical_category TEXT,
+            intent JSONB,
+            pharmacology_profiles JSONB,
+            mental_health_profiles JSONB,
+            suspected_condition JSONB,
+            symptoms_reported JSONB,
+            urgency_level TEXT,
+            barriers JSONB,
+            cultural_tags JSONB,
+            outcome_referral TEXT,
+            literacy_score INT,
+            cultural_notes TEXT,
+            sdoh_profiles JSONB,
+            sdoh_economic_barrier BOOLEAN,
+            sdoh_geographic_barrier BOOLEAN,
+            sdoh_social_barrier BOOLEAN,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            analysis_timestamp TIMESTAMP WITH TIME ZONE,
+            conversation_day_of_week TEXT,
+            conversation_month INT,
+            conversation_year INT
+        );
+        """
+    with engine.begin() as conn:
+        conn.execute(text(ddl))
+
+
 def _select_columns_sql() -> str:
     parts = [
         COLUMN_ID,
@@ -193,8 +265,8 @@ class ConsultationTurn:
     """One row / turn in a consultation session (user + assistant message pair)."""
 
     id: int
-    user_id: int
-    session_id: int
+    user_id: int | str
+    session_id: int | str
     user_message: str
     assistant_message: str
     created_at: datetime
@@ -220,10 +292,17 @@ def _coerce_datetime(value: Any) -> datetime:
 
 def _row_to_turn(row: Iterable[Any]) -> ConsultationTurn:
     rid, user_id, session_id, user_message, assistant_message, created_at = row
+    
+    def _to_int_or_str(val: Any) -> int | str:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return str(val or "")
+
     return ConsultationTurn(
         id=int(rid),
-        user_id=int(user_id),
-        session_id=int(session_id),
+        user_id=_to_int_or_str(user_id),
+        session_id=_to_int_or_str(session_id),
         user_message=str(user_message or ""),
         assistant_message=str(assistant_message or ""),
         created_at=_coerce_datetime(created_at),
@@ -352,7 +431,7 @@ def fetch_all_session_ids(
     engine: Optional[Engine] = None,
     min_turns: int | None = None,
     since: datetime | None = None,
-) -> list[int]:
+) -> list[int | str]:
     """Distinct session ids with >= `min_turns` rows; optional `since` on MAX(created_at)."""
     min_turns = min_turns if min_turns is not None else min_conversation_turns()
     since = since if since is not None else batch_conversation_since()
@@ -377,7 +456,14 @@ def fetch_all_session_ids(
         )
         with eng.connect() as conn:
             rows = conn.execute(q, binds).fetchall()
-        return [int(r[0]) for r in rows]
+            
+        def _to_int_or_str(val: Any) -> int | str:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return str(val or "")
+                
+        return [_to_int_or_str(r[0]) for r in rows]
     finally:
         if own_engine:
             eng.dispose()
@@ -388,6 +474,7 @@ def fetch_analyzed_session_ids(*, engine: Optional[Engine] = None) -> set[str]:
     own_engine = engine is None
     eng = engine or get_engine()
     try:
+        create_analysis_table_if_not_exists(eng)
         sid = _safe_ident_fragment(COLUMN_SESSION_ID)
         q = text(
             f"""
@@ -507,40 +594,41 @@ def insert_conversation_analysis(
         )
     own_engine = engine is None
     eng = engine or get_engine()
-    created_at = created_at or datetime.now(timezone.utc)
-    params_list = _analysis_insert_params(
-        session_id=session_id,
-        user_phone=user_phone,
-        model_name=model_name,
-        analysis=analysis,
-        created_at=created_at,
-        conversation_started=conversation_started,
-    )
-    if not params_list:
-        return
-    tbl = qualified_table_name(eng, ANALYSIS_TABLE_NAME)
-    q = text(
-        f"""
-        INSERT INTO {tbl} (
-            session_id, user_phone, model_name, segment_index,
-            clinical_category, intent, pharmacology_profiles, mental_health_profiles,
-            suspected_condition, symptoms_reported, urgency_level, barriers, cultural_tags,
-            outcome_referral, literacy_score, cultural_notes, sdoh_profiles,
-            sdoh_economic_barrier, sdoh_geographic_barrier, sdoh_social_barrier,
-            created_at, analysis_timestamp,
-            conversation_day_of_week, conversation_month, conversation_year
-        ) VALUES (
-            :session_id, :user_phone, :model_name, :segment_index,
-            :clinical_category, :intent, :pharmacology_profiles, :mental_health_profiles,
-            :suspected_condition, :symptoms_reported, :urgency_level, :barriers, :cultural_tags,
-            :outcome_referral, :literacy_score, :cultural_notes, :sdoh_profiles,
-            :sdoh_economic_barrier, :sdoh_geographic_barrier, :sdoh_social_barrier,
-            :created_at, :analysis_timestamp,
-            :conversation_day_of_week, :conversation_month, :conversation_year
-        )
-        """
-    )
     try:
+        create_analysis_table_if_not_exists(eng)
+        created_at = created_at or datetime.now(timezone.utc)
+        params_list = _analysis_insert_params(
+            session_id=session_id,
+            user_phone=user_phone,
+            model_name=model_name,
+            analysis=analysis,
+            created_at=created_at,
+            conversation_started=conversation_started,
+        )
+        if not params_list:
+            return
+        tbl = qualified_table_name(eng, ANALYSIS_TABLE_NAME)
+        q = text(
+            f"""
+            INSERT INTO {tbl} (
+                session_id, user_phone, model_name, segment_index,
+                clinical_category, intent, pharmacology_profiles, mental_health_profiles,
+                suspected_condition, symptoms_reported, urgency_level, barriers, cultural_tags,
+                outcome_referral, literacy_score, cultural_notes, sdoh_profiles,
+                sdoh_economic_barrier, sdoh_geographic_barrier, sdoh_social_barrier,
+                created_at, analysis_timestamp,
+                conversation_day_of_week, conversation_month, conversation_year
+            ) VALUES (
+                :session_id, :user_phone, :model_name, :segment_index,
+                :clinical_category, :intent, :pharmacology_profiles, :mental_health_profiles,
+                :suspected_condition, :symptoms_reported, :urgency_level, :barriers, :cultural_tags,
+                :outcome_referral, :literacy_score, :cultural_notes, :sdoh_profiles,
+                :sdoh_economic_barrier, :sdoh_geographic_barrier, :sdoh_social_barrier,
+                :created_at, :analysis_timestamp,
+                :conversation_day_of_week, :conversation_month, :conversation_year
+            )
+            """
+        )
         with eng.begin() as conn:
             conn.execute(q, params_list)
     finally:
