@@ -371,7 +371,7 @@ class AnalysisSegment(BaseModel):
     immunization_profiles: Optional[List[Immunization]] = None
     mental_health_profiles: Optional[List[MentalHealthCrisis]] = None
     suspected_condition: Optional[List[str]] = Field(
-        "", description="Standardized condition label- ICD-11 in descending order of likelihood."
+        "", description="Standardized condition label- ICD-11 in descending order of likelihood (max 3 conditions)."
     )
     symptoms_reported: Optional[List[SymptomNature]] = Field(default_factory=list)
     urgency_level: Optional[UrgencyLevel] = None
@@ -384,13 +384,46 @@ class AnalysisSegment(BaseModel):
         description="user literacy level:1–5; 1 is illiterate and 5 is highly medical / fluent.",
     )
 
+
+class HealthBeliefOrientation(str, Enum):
+    CLINICAL_ONLY = "Purely Clinical"
+    INTEGRATIVE = "Integrative (Clinical + Traditional/Herbal)"
+    FAITH_BASED = "Faith-based/Spiritual emphasis"
+    COMMUNITY_DRIVEN = "Reliance on peer/community advice"
+
+class DecisionAuthority(str, Enum):
+    INDIVIDUAL = "Individual - User makes independent health decisions."
+    SPOUSAL = "Spousal - Decisions are made jointly with a spouse."
+    FAMILY_ELDER = "Family/Elder - Decisions require input/approval from parents or elders."
+    COMMUNAL = "Communal/Peer - Decisions are heavily influenced by community/peer feedback."
+    RELIGIOUS_LEADER = "Religious/Spiritual Leader - Decisions are mediated by spiritual guidance."
+    COLLECTIVE = "Collective - Decisions are made by a family unit or group."
+
+
+class CulturalNotes(BaseModel):
+    # Demographics & Context
+    primary_language: str = Field(..., description="Language(s) user prefers to speak/code-switch in.")
+    residency: Optional[str] = Field(None, description="Urban, semi-urban, or rural context affecting access/beliefs.")
+    
+    # Behavioral & Cognitive Markers
+    health_belief_orientation: HealthBeliefOrientation = Field(..., description="The underlying framework the user uses to interpret health.")
+    
+    # Linguistic & Cultural Nuances
+    colloquialisms_used: List[str] = Field(default_factory=list, description="Specific local idioms or Pidgin phrases used by the user.")
+    cultural_taboos_or_sensitivities: List[str] = Field(default_factory=list, description="Identified topics that require extreme tact or avoidance.")
+    
+    # Practical Application
+    decision_making_authority: Optional[DecisionAuthority] = Field(None, description="The primary influence or authority behind the user's health decisions.")
+    local_terminology: List[str] = Field(default_factory=list, description="Specific local idioms or phrases used by the user.")
+
+
 class ConversationAnalysis(BaseModel):
     """Structured output shape for conversation analysis (persisted + OpenAI schema)."""
 
     model_config = ConfigDict(extra="forbid")
     topic_segments: List[AnalysisSegment]
     sdoh_profiles: List[SDoHProfile]
-    cultural_notes: str = ""
+    cultural_notes: CulturalNotes = None
 
     @classmethod
     def llm_json_schema(cls) -> dict:
