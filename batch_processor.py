@@ -32,8 +32,9 @@ from output import ConversationAnalysis
 BATCH_ENDPOINT = "/v1/chat/completions"
 DEFAULT_SYSTEM_PROMPT = (
     "You are a clinical conversation analyst. Analyze the full transcript into the "
-    "required JSON schema. Do not include session_id, user_id, phone, model name, "
-    "timestamps, or segment_index. Return only topic_segments, sdoh_profiles, cultural_notes."
+    "required JSON schema. Fill all relevant/appropriate fields in the schema where applicable. "
+    "Do not make up information. If you are unsure, leave the field as null. "
+    "Think carefully, be accurate and precise. Standardize your responses."
 )
 
 _TERMINAL_BATCH = frozenset({"completed", "failed", "expired", "cancelled"})
@@ -350,7 +351,7 @@ def _coerce_conversation_analysis(data: dict[str, Any]) -> tuple[ConversationAna
     if "sdoh_profiles" not in cleaned:
         cleaned["sdoh_profiles"] = []
     if "cultural_notes" not in cleaned:
-        cleaned["cultural_notes"] = ""
+        cleaned["cultural_notes"] = None
 
     try:
         return ConversationAnalysis.model_validate(cleaned), None

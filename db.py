@@ -188,7 +188,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
             cultural_tags JSON,
             outcome_referral VARCHAR(255),
             literacy_score INT,
-            cultural_notes JSONB,
+            cultural_notes JSON,
             sdoh_profiles JSON,
             sdoh_economic_barrier BOOLEAN,
             sdoh_geographic_barrier BOOLEAN,
@@ -542,7 +542,7 @@ def _analysis_insert_params(
     conv_time = conversation_started
     calendar = conversation_calendar_parts(conv_time)
     sdoh_economic, sdoh_geographic, sdoh_social = _sdoh_barrier_flags(analysis.sdoh_profiles)
-    cultural_notes = analysis.cultural_notes or ""
+    cultural_notes = _serialize_db_value(analysis.cultural_notes)
 
     rows: list[dict[str, Any]] = []
     segments = analysis.topic_segments or []

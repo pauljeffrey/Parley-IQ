@@ -131,8 +131,8 @@ ANALYSIS_COLUMN_SPECS: tuple[ColumnSpec, ...] = (
     ),
     ColumnSpec(
         "cultural_notes",
-        "TEXT",
-        "Conversation-level cultural notes (repeated on each segment row).",
+        "JSON/TEXT",
+        "Conversation-level cultural notes (`output.CulturalNotes`, repeated on each segment row).",
     ),
     ColumnSpec(
         "sdoh_profiles",
