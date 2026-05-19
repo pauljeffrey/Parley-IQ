@@ -26,7 +26,7 @@ def main() -> None:
     _log(f"BATCH_MIN_TURNS={db.min_conversation_turns()} BATCH_SHARD_SIZE={bp.batch_shard_size()}")
     _log(f"BATCH_MAX_SESSIONS={os.environ.get('BATCH_MAX_SESSIONS', '') or 'no cap'}")
     since = db.batch_conversation_since()
-    _log(f"BATCH_CONVERSATION_SINCE_DAYS/SINCE → {since.isoformat() if since else 'none'}")
+    _log(f"BATCH_CONVERSATION_SINCE_DAYS/SINCE -> {since.isoformat() if since else 'none'}")
     _log(f"BATCH_WAIT_FOR_COMPLETION={bp.env_bool('BATCH_WAIT_FOR_COMPLETION')}")
     _log(f"ANALYSIS_TABLE={db.ANALYSIS_TABLE_NAME}\n")
 

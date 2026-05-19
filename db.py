@@ -173,7 +173,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
         ddl = f"""
         CREATE TABLE IF NOT EXISTS {qualified} (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
-            session_id BIGINT,
+            session_id VARCHAR(255),
             user_phone VARCHAR(255),
             model_name VARCHAR(255),
             segment_index INT,
@@ -205,7 +205,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
         ddl = f"""
         CREATE TABLE IF NOT EXISTS {qualified} (
             id BIGSERIAL PRIMARY KEY,
-            session_id BIGINT,
+            session_id TEXT,
             user_phone TEXT,
             model_name TEXT,
             segment_index INT,
@@ -234,6 +234,14 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
         """
     with engine.begin() as conn:
         conn.execute(text(ddl))
+        # Ensure session_id column is VARCHAR/TEXT to support UUIDs/string session IDs in existing tables
+        try:
+            if engine.dialect.name == "mysql":
+                conn.execute(text(f"ALTER TABLE {qualified} MODIFY COLUMN session_id VARCHAR(255)"))
+            else:
+                conn.execute(text(f"ALTER TABLE {qualified} ALTER COLUMN session_id TYPE TEXT"))
+        except Exception:
+            pass  # Ignore migration failures if already correct or lacking permissions
 
 
 def _select_columns_sql() -> str:

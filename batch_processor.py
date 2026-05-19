@@ -183,6 +183,13 @@ def completed_session_ids(engine: Engine) -> set[str]:
     return done
 
 
+def _to_int_or_str(val: Any) -> int | str:
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return str(val or "")
+
+
 def collect_pending_session_ids(engine: Engine) -> list[int | str]:
     ids = fetch_all_session_ids(
         engine=engine,
@@ -190,13 +197,6 @@ def collect_pending_session_ids(engine: Engine) -> list[int | str]:
         since=batch_conversation_since(),
     )
     skip = completed_session_ids(engine)
-    
-    def _to_int_or_str(val: Any) -> int | str:
-        try:
-            return int(val)
-        except (ValueError, TypeError):
-            return str(val or "")
-            
     ids = [_to_int_or_str(i) for i in ids if str(i) not in skip]
     cap = batch_max_sessions()
     return ids[:cap] if cap is not None else ids
@@ -610,7 +610,7 @@ def poll_shards_and_persist(
 def run_sharded_batch_pipeline(
     engine: Engine,
     *,
-    session_ids: Sequence[int] | None = None,
+    session_ids: Sequence[int | str] | None = None,
     wait: bool = True,
     poll_interval_sec: float = 15.0,
     log: Callable[[str], None] = print,
@@ -618,7 +618,7 @@ def run_sharded_batch_pipeline(
     """Build shards, submit all OpenAI batches, persist each shard as it completes."""
     skip = completed_session_ids(engine)
     ids = (
-        [int(i) for i in session_ids]
+        [_to_int_or_str(i) for i in session_ids]
         if session_ids is not None
         else collect_pending_session_ids(engine)
     )

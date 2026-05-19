@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, confloat
 
@@ -395,4 +395,36 @@ class ConversationAnalysis(BaseModel):
     @classmethod
     def llm_json_schema(cls) -> dict:
         """JSON Schema for Batch/Chat API (clinical fields only; no DB ids)."""
-        return cls.model_json_schema()
+        schema = cls.model_json_schema()
+
+        def make_schema_strict(s: Any) -> None:
+            if not isinstance(s, dict):
+                return
+
+            if "$ref" in s:
+                for k in list(s.keys()):
+                    if k != "$ref":
+                        del s[k]
+                return
+
+            if s.get("type") == "object":
+                s["additionalProperties"] = False
+                properties = s.get("properties", {})
+                s["required"] = list(properties.keys())
+                for key in properties:
+                    make_schema_strict(properties[key])
+            elif s.get("type") == "array":
+                if "items" in s:
+                    make_schema_strict(s["items"])
+
+            for key in ("anyOf", "oneOf", "allOf"):
+                if key in s and isinstance(s[key], list):
+                    for sub in s[key]:
+                        make_schema_strict(sub)
+
+            if "$defs" in s and isinstance(s["$defs"], dict):
+                for key in s["$defs"]:
+                    make_schema_strict(s["$defs"][key])
+
+        make_schema_strict(schema)
+        return schema
