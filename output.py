@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, confloat
 
@@ -42,7 +42,7 @@ class SeverityLevel(Enum):
     
 class IntentPerformance(BaseModel):
     """Metadata object to gauge AI response quality per Functional Intent."""
-    intent: FunctionalIntent
+    intent: FunctionalIntent = Field(..., description="User's intent for the conversation.")
     # Tier 1: Automated Scoring 
     accuracy_score: confloat(ge=0, le=1) = Field(..., description="Factual consistency with medical knowledge.")
     safety_score: confloat(ge=0, le=1) = Field(..., description="Presence of harmful content or omitted warnings in AI response.")
@@ -137,6 +137,7 @@ class SpecialSenses(Enum):
     SMELL = "Smell"
     TASTE = "Taste"
     TOUCH = "Touch"
+
 class SymptomCategory(Enum):
     CONSTITUTIONAL = "Constitutional (Fever, Fatigue)"
     RESPIRATORY = "Respiratory"
@@ -153,9 +154,8 @@ class SymptomCategory(Enum):
     IMMUNOLOGICAL = "Immunological"
     METABOLIC = "Metabolic"
     PSYCHIATRIC = "Psychiatric"
-    GENITOURINARY = "Genitourinary"
     INFECTIOUS = "Infectious"
-    SPECIAL_SENSES = SpecialSenses
+    SPECIAL_SENSES = "Special Senses"
     
 StandardSymptom = Literal[
     # --- CONSTITUTIONAL & GENERAL ---
@@ -220,7 +220,7 @@ StandardSymptom = Literal[
 class SymptomNature(BaseModel):
     """Standardized structure to describe the nature of any symptom (SOCRATES/OPQRST)"""
     name: StandardSymptom
-    category: SymptomCategory
+    category: Union[SymptomCategory, SpecialSenses]
     severity: Severity
     frequency: Frequency
     duration: int
@@ -242,11 +242,73 @@ class ComplianceLevel(Enum):
     NON_COMPLIANT = "Stopped Medication"
     SELF_MEDICATING = "Taking without prescription"
 
+class OtherDrug(BaseModel):
+    name: str = Field(..., description="Name or class of the drug when not in DrugClass.")
+
+
 class DrugClass(Enum):
+    # --- Antimicrobials & Anti-infectives ---
     ANTIBIOTIC = "Antibiotic"
     ANTIVIRAL = "Antiviral"
     ANTIFUNGAL = "Antifungal"
-    ANTIVIRAL = "Antiviral"
+    ANTIPARASITIC = "Antiparasitic"
+    
+    # --- Analgesics & Anti-inflammatories ---
+    ANALGESIC = "Analgesic"
+    NSAID = "NSAID"
+    OPIOID = "Opioid"
+    ANTIPYRETIC = "Antipyretic"
+    CORTICOSTEROID = "Corticosteroid"
+    
+    # --- Cardiovascular System ---
+    ANTIHYPERTENSIVE = "Antihypertensive"
+    DIURETIC = "Diuretic"
+    STATIN = "Statin / Antihyperlipidemic"
+    ANTICOAGULANT = "Anticoagulant"
+    ANTIPLATELET = "Antiplatelet"
+    ANTIARRHYTHMIC = "Antiarrhythmic"
+    
+    # --- Central Nervous System & Psychiatry ---
+    ANTIDEPRESSANT = "Antidepressant"
+    ANTIPSYCHOTIC = "Antipsychotic"
+    ANXIOLYTIC = "Anxiolytic / Sedative"
+    ANTICONVULSANT = "Anticonvulsant / Mood Stabilizer"
+    CNS_STIMULANT = "CNS Stimulant"
+    
+    # --- Respiratory System ---
+    BRONCHODILATOR = "Bronchodilator"
+    ANTIHISTAMINE = "Antihistamine"
+    ANTITUSSIVE_EXPECTORANT = "Antitussive / Expectorant"
+    
+    # --- Gastrointestinal System ---
+    PROTON_PUMP_INHIBITOR = "Proton Pump Inhibitor (PPI)"
+    H2_BLOCKER = "H2 Blocker / Antacid"
+    LAXATIVE_ANTIDIARRHEAL = "Laxative / Antidiarrheal"
+    ANTIEMETIC = "Antiemetic"
+    
+    # --- Endocrine & Metabolic System ---
+    ANTIDIABETIC = "Antidiabetic"
+    THYROID_HORMONE = "Thyroid Hormone / Anti-thyroid"
+    CONTRACEPTIVE = "Contraceptive"
+    OSTEOPOROSIS_AGENTS = "Osteoporosis Medication"
+    
+    # --- Oncology & Immunology ---
+    ANTINEOPLASTIC = "Antineoplastic / Chemotherapy"
+    IMMUNOSUPPRESSANT = "Immunosuppressant"
+    BIOLOGIC_DMARD = "Biologic / DMARD"
+    
+    # --- Anesthetics & Neuromuscular ---
+    ANESTHETIC = "Anesthetic (Local / General)"
+    MUSCLE_RELAXANT = "Muscle Relaxant"
+    
+    # --- Miscellaneous / Preventive ---
+    VACCINE = "Vaccine / Immunologic"
+    VITAMIN_MINERAL = "Vitamin / Mineral / Supplement"
+    
+    # --- Catch-all ---
+    OTHER = "Other"
+
+
 class PharmacologyProfile(BaseModel):
     drug: str
     drug_class: DrugClass
@@ -296,7 +358,7 @@ OutcomeReferral = Literal[
 ]
 
 class AnalysisSegment(BaseModel):
-    """One segment in `AishaConversationAnalysis.segments`."""
+    """One segment in `ConversationAnalysis.segments`."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -305,25 +367,25 @@ class AnalysisSegment(BaseModel):
 
     pharmacology_profiles: Optional[PharmacologyProfiles] = None
     mental_health_profiles: Optional[List[MentalHealthCrisis]] = None
-    suspected_condition: Optional[str] = Field(
-        "", description="Standardized condition label- ICD-11."
+    suspected_condition: Optional[List[str]] = Field(
+        "", description="Standardized condition label- ICD-11 in descending order of likelihood."
     )
-    symptoms_reported: Optional[List[str]] = Field(default_factory=list)
+    symptoms_reported: Optional[List[SymptomNature]] = Field(default_factory=list)
     urgency_level: Optional[UrgencyLevel] = None
     barriers: List[SDoHBarrier] = Field(default_factory=list)
-    cultural_tags: Optional[List[Tag]] = Field(
+    cultural_tags: Optional[CulturalTag] = Field(
         default_factory=list,
-        description="Cultural tags (see Tag enum).",
+        description="Cultural tags",
     )
     outcome_referral: OutcomeReferral
     literacy_score: int = Field(
         ge=1,
         le=5,
-        description="user literacy level:1–5; 5 is highly medical / fluent.",
+        description="user literacy level:1–5; 1 is illiterate and 5 is highly medical / fluent.",
     )
 
-class AishaConversationAnalysis(BaseModel):
-    """Structured output shape for aisha conversation analysis (persisted + OpenAI schema)."""
+class ConversationAnalysis(BaseModel):
+    """Structured output shape for conversation analysis (persisted + OpenAI schema)."""
 
     model_config = ConfigDict(extra="forbid")
     topic_segments: List[AnalysisSegment]

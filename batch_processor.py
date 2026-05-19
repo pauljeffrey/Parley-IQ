@@ -10,25 +10,67 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Iterator, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Iterable, Iterator, Mapping, MutableMapping, Optional, Sequence
 
 from openai import OpenAI
 from sqlalchemy.engine import Engine
 
 from db import (
     ConsultationTurn,
+    conversation_started_at,
     fetch_all_session_ids,
     fetch_conversation_by_session_id,
     insert_conversation_analysis,
+    min_conversation_turns,
 )
-from output import AishaConversationAnalysis
+from output import ConversationAnalysis
 
 BATCH_ENDPOINT = "/v1/chat/completions"
 DEFAULT_SYSTEM_PROMPT = (
     "You are a clinical conversation analyst. Analyze the full transcript into the "
-    "required JSON schema. Use only allowed enum string values from the schema. "
-    "Set conversation_id to the Session ID given at the start of the user message."
+    "required JSON schema provided."
 )
+
+
+def skip_completed_sessions() -> bool:
+    return os.environ.get("BATCH_SKIP_COMPLETED", "true").lower() in ("1", "true", "yes", "on")
+
+
+def completed_sessions_cache_path() -> Path:
+    return Path(os.environ.get("BATCH_COMPLETED_SESSIONS_CACHE", "batch_completed_sessions.json"))
+
+
+def load_completed_session_ids() -> set[str]:
+    path = completed_sessions_cache_path()
+    if not path.is_file():
+        return set()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    raw = data.get("completed_session_ids", [])
+    return {str(sid) for sid in raw}
+
+
+def _save_completed_session_ids(ids: set[str]) -> None:
+    path = completed_sessions_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"completed_session_ids": sorted(ids, key=lambda x: (len(x), x))}
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def mark_sessions_completed(session_ids: Iterable[int | str]) -> None:
+    """Record session ids successfully persisted after a completed batch job."""
+    new_ids = {str(sid) for sid in session_ids}
+    if not new_ids:
+        return
+    done = load_completed_session_ids()
+    done.update(new_ids)
+    _save_completed_session_ids(done)
+
+
+def exclude_completed_session_ids(ids: Sequence[int | str]) -> list[int | str]:
+    if not skip_completed_sessions():
+        return list(ids)
+    done = load_completed_session_ids()
+    return [sid for sid in ids if str(sid) not in done]
 
 
 def get_openai_client() -> OpenAI:
@@ -51,11 +93,11 @@ def _response_format_dict() -> dict[str, Any]:
         "true",
         "yes",
     )
-    schema = AishaConversationAnalysis.model_json_schema()
+    schema = ConversationAnalysis.model_json_schema()
     rf: dict[str, Any] = {
         "type": "json_schema",
         "json_schema": {
-            "name": "aisha_conversation_analysis",
+            "name": "conversation_analysis",
             "schema": schema,
         },
     }
@@ -70,7 +112,7 @@ class ConversationJob:
 
     session_id: str
     user_phone: str
-    transcript: List[ConsultationTurn]
+    transcript: str
 
     @property
     def custom_id(self) -> str:
@@ -90,23 +132,26 @@ def load_consultation_jobs(
     *,
     session_ids: Optional[Sequence[int | str]] = None,
     limit: Optional[int] = None,
+    min_turns: int | None = None,
 ) -> list[ConversationJob]:
     """
-    Read-only: load sessions from `aisha.user_consultation` and build jobs.
-    `user_phone` is taken as `str(session_id)` when no separate phone column exists.
+    Read-only: load sessions from the configured conversation table and build jobs.
+    Skips sessions with fewer than `min_turns` user–assistant pairs (default: BATCH_MIN_TURNS).
     """
+    min_turns = min_turns if min_turns is not None else min_conversation_turns()
     ids: list[int | str] = (
         list(session_ids)
         if session_ids is not None
-        else fetch_all_session_ids(engine=engine)
+        else fetch_all_session_ids(engine=engine, min_turns=min_turns)
     )
+    ids = exclude_completed_session_ids(ids)
     if limit is not None:
         ids = ids[: max(0, limit)]
 
     jobs: list[ConversationJob] = []
     for sid in ids:
         turns = fetch_conversation_by_session_id(sid, engine=engine)
-        if not turns:
+        if len(turns) < min_turns:
             continue
         sid_str = str(sid)
         jobs.append(
@@ -120,7 +165,7 @@ def load_consultation_jobs(
 
 
 def _user_content(job: ConversationJob) -> str:
-    return f"Session ID: {job.session_id}\n\nConversation transcript:\n{job.transcript}"
+    return f"Conversation transcript:\n{job.transcript}"
 
 
 def chat_completion_body(job: ConversationJob, model: str) -> dict[str, Any]:
@@ -142,6 +187,7 @@ def prepare_batch_file(
     Write a Batch API JSONL file; return map custom_id -> {session_id, user_phone}.
     One model per file (uses get_model_name()).
     """
+
     model = get_model_name()
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,7 +211,6 @@ def upload_batch_input(client: OpenAI, jsonl_path: str | Path) -> str:
     with path.open("rb") as fh:
         uploaded = client.files.create(file=fh, purpose="batch")
     return uploaded.id
-
 
 def create_chat_completion_batch(
     client: OpenAI,
@@ -220,9 +265,54 @@ def iter_batch_jsonl_lines(blob: str) -> Iterator[dict[str, Any]]:
             yield json.loads(line)
 
 
+def _non_empty(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return len(value) > 0
+    return True
+
+
+def _coerce_conversation_analysis(data: dict[str, Any]) -> tuple[ConversationAnalysis | None, str | None]:
+    """Map non-empty LLM fields onto ConversationAnalysis (with alias support)."""
+    aliases = {
+        "segments": "topic_segments",
+        "topic_segment": "topic_segments",
+        "sdoh_indicators": "sdoh_profiles",
+        "sdoh": "sdoh_profiles",
+    }
+    payload: dict[str, Any] = dict(data)
+    for old_key, new_key in aliases.items():
+        if old_key in payload and new_key not in payload and _non_empty(payload[old_key]):
+            payload[new_key] = payload.pop(old_key)
+
+    cleaned: dict[str, Any] = {}
+    for field_name in ConversationAnalysis.model_fields:
+        if field_name in payload and _non_empty(payload[field_name]):
+            cleaned[field_name] = payload[field_name]
+
+    if "topic_segments" not in cleaned:
+        cleaned["topic_segments"] = []
+    if "sdoh_profiles" not in cleaned:
+        cleaned["sdoh_profiles"] = []
+    if "cultural_notes" not in cleaned:
+        cleaned["cultural_notes"] = ""
+
+    try:
+        return ConversationAnalysis.model_validate(cleaned), None
+    except Exception as strict_exc:
+        try:
+            partial = ConversationAnalysis.model_construct(**cleaned)
+            return ConversationAnalysis.model_validate(partial.model_dump(mode="json")), None
+        except Exception:
+            return None, f"validate: {strict_exc}"
+
+
 def parse_successful_analysis(
     record: Mapping[str, Any],
-) -> tuple[Optional[AishaConversationAnalysis], Optional[str]]:
+) -> tuple[Optional[ConversationAnalysis], Optional[str]]:
     """From one output JSONL object, return (analysis, error_message)."""
     if record.get("error"):
         err = record["error"]
@@ -248,10 +338,9 @@ def parse_successful_analysis(
         data = msg
     else:
         data = json.loads(msg)
-    try:
-        return AishaConversationAnalysis.model_validate(data), None
-    except Exception as exc:
-        return None, f"validate: {exc}"
+    if not isinstance(data, dict):
+        return None, "message content is not a JSON object"
+    return _coerce_conversation_analysis(data)
 
 
 def save_batch_metadata(path: str | Path, payload: dict[str, Any]) -> None:
@@ -276,11 +365,12 @@ def persist_batch_results(
     engine: Engine,
 ) -> dict[str, int]:
     """
-    Validate each successful line as `AishaConversationAnalysis` and insert into
-    `aisha_conversation_analysis` (via db.insert_conversation_analysis).
+    Validate each successful line as `ConversationAnalysis` and insert into
+    the configured analysis table (via db.insert_conversation_analysis).
     """
     inserted = 0
     skipped = 0
+    newly_completed: list[str] = []
     for record in iter_batch_jsonl_lines(output_jsonl):
         cid = record.get("custom_id")
         if not cid or cid not in custom_id_meta:
@@ -291,15 +381,24 @@ def persist_batch_results(
         if err or analysis is None:
             skipped += 1
             continue
-        analysis = analysis.model_copy(
-            update={"conversation_id": str(meta["session_id"])}
-        )
+        sid = _session_id_typed(meta["session_id"])
+        turns = fetch_conversation_by_session_id(sid, engine=engine)
+        if not analysis.topic_segments:
+            skipped += 1
+            continue
         insert_conversation_analysis(
-            _session_id_typed(meta["session_id"]),
+            sid,
             meta["user_phone"],
             model_name,
             analysis,
             engine=engine,
+            conversation_started=conversation_started_at(turns),
         )
         inserted += 1
-    return {"inserted": inserted, "skipped_or_failed": skipped}
+        newly_completed.append(str(sid))
+    mark_sessions_completed(newly_completed)
+    return {
+        "inserted": inserted,
+        "skipped_or_failed": skipped,
+        "cached_completed": len(newly_completed),
+    }

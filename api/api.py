@@ -1,4 +1,4 @@
-"""HTTP API exposing the pydantic-ai analytics agent."""
+"""HTTP API exposing analytics_agent."""
 
 from __future__ import annotations
 
@@ -11,18 +11,19 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+import analysis_queries as aq
 from analytics_agent import (
     AnalyticsAgentDeps,
+    analytics_agent_run,
     coerce_message_history,
-    run_analytics_sync,
     zip_b64_optional,
 )
 from db import get_engine
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
-app = FastAPI(title="AISHA Conversation Analytics")
+app = FastAPI(title="Parley Conversation Analytics")
 
 
 class AnalyticsChatPayload(BaseModel):
@@ -53,12 +54,16 @@ def health() -> dict[str, str]:
 @app.post("/analytics/chat", response_model=AnalyticsChatResponse)
 def analytics_chat(body: AnalyticsChatPayload) -> AnalyticsChatResponse:
     history = coerce_message_history(body.chat_history)
-    workdir = Path(tempfile.mkdtemp(prefix="aisha_analytics_"))
+    workdir = Path(tempfile.mkdtemp(prefix="parley_analytics_"))
     engine = None
     try:
         engine = get_engine()
-        deps = AnalyticsAgentDeps(engine=engine, work_dir=workdir)
-        output_text, new_msgs = run_analytics_sync(
+        deps = AnalyticsAgentDeps(
+            engine=engine,
+            work_dir=workdir,
+            qualified_table=aq.qualified_analysis_table(engine),
+        )
+        output_text, new_msgs = analytics_agent_run(
             body.message,
             message_history=history or None,
             deps=deps,

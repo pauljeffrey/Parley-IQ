@@ -1,6 +1,6 @@
 """
-Orchestrator: read `aisha.user_consultation` (read-only), build Batch JSONL, submit to OpenAI,
-download results, insert into `aisha.aisha_conversation_analysis`.
+Orchestrator: read conversations (read-only), build Batch JSONL, submit to OpenAI,
+download results, insert into the configured analysis table.
 """
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import batch_processor as bp
 import db
@@ -22,8 +24,6 @@ def _truthy(name: str, default: bool = True) -> bool:
 
 
 def main() -> None:
-    load_dotenv()
-
     limit_raw = os.environ.get("BATCH_MAX_SESSIONS", "").strip()
     limit = int(limit_raw) if limit_raw else None
     poll = float(os.environ.get("BATCH_POLL_INTERVAL_SEC", "15"))
@@ -36,9 +36,14 @@ def main() -> None:
 
     engine = db.get_engine()
     try:
+        if bp.skip_completed_sessions():
+            n_done = len(bp.load_completed_session_ids())
+            if n_done:
+                print(f"Skipping {n_done} session(s) already completed (cache).")
+
         jobs = bp.load_consultation_jobs(engine, limit=limit)
         if not jobs:
-            print("No consultation sessions to process.")
+            print("No consultation sessions to process (all done or none eligible).")
             return
 
         custom_meta = bp.prepare_batch_file(jobs, input_path)
@@ -49,7 +54,7 @@ def main() -> None:
         batch = bp.create_chat_completion_batch(
             client,
             file_id,
-            metadata={"source": "run.py"},
+            metadata={},
         )
         bp.save_batch_metadata(
             meta_path,
@@ -84,6 +89,7 @@ def main() -> None:
 
         stats = bp.persist_batch_results(out_text, custom_meta, model_name, engine)
         print(f"Database: {stats}")
+        print(f"Completed-session cache: {bp.completed_sessions_cache_path()}")
     finally:
         engine.dispose()
 

@@ -1,12 +1,10 @@
 """
-Database access for `aisha.user_consultation`.
+Database access for conversation ingestion and analysis persistence.
 
-Toggle MySQL vs PostgreSQL with `DB_ENGINE` (or legacy `AISHA_DB_BACKEND`) and
-`DATABASE_URL` / `AISHA_DATABASE_URL` or `AISHA_DB_*` components (see `resolve_database_url`).
+Toggle MySQL vs PostgreSQL with `DB_ENGINE` and `DATABASE_URL` or `DB_*` components
+(see `resolve_database_url`).
 
-Expected columns (adjust COLUMN_* constants if your DDL differs):
-  id, user_id, session_id, user_message, assistant_message,
-  created_at, category, score, evaluation
+Table names come from `DB_SCHEMA`, `CONVERSATION_TABLE`, and `ANALYSIS_TABLE`.
 """
 
 from __future__ import annotations
@@ -23,13 +21,7 @@ from urllib.parse import quote_plus
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from output import AishaConversationAnalysis
-
-# --- Table / column mapping -------------------------------------------------
-
-SCHEMA_NAME = os.environ.get("AISHA_DB_SCHEMA", "aisha")
-TABLE_NAME = os.environ.get("AISHA_DB_TABLE", "user_consultation")
-ANALYSIS_TABLE_NAME = os.environ.get("AISHA_ANALYSIS_TABLE", "aisha_conversation_analysis")
+from output import ConversationAnalysis, SDoHBarrier, SDoHProfile
 
 COLUMN_ID = "id"
 COLUMN_USER_ID = "user_id"
@@ -37,9 +29,6 @@ COLUMN_SESSION_ID = "session_id"
 COLUMN_USER_MESSAGE = "user_message"
 COLUMN_ASSISTANT_MESSAGE = "assistant_message"
 COLUMN_CREATED_AT = "created_at"
-COLUMN_CATEGORY = "category"
-COLUMN_SCORE = "score"
-COLUMN_EVALUATION = "evaluation"
 
 
 class DatabaseBackend(str, Enum):
@@ -47,7 +36,7 @@ class DatabaseBackend(str, Enum):
     POSTGRESQL = "postgresql"
 
 
-class AishaDBError(RuntimeError):
+class DBError(RuntimeError):
     """Raised when configuration is invalid or the driver/backend does not match."""
 
 
@@ -64,11 +53,21 @@ def _load_dotenv_if_available() -> None:
 
 _load_dotenv_if_available()
 
+SCHEMA_NAME = os.environ.get("DB_SCHEMA", "public")
+CONVERSATION_TABLE_NAME = os.environ.get("CONVERSATION_TABLE", "user_consultation")
+ANALYSIS_TABLE_NAME = os.environ.get("ANALYSIS_TABLE", "conversation_analysis")
+
+
+def min_conversation_turns() -> int:
+    raw = os.environ.get("BATCH_MIN_TURNS", "5").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 5
+
 
 def get_configured_backend() -> DatabaseBackend:
-    raw = (
-        os.environ.get("DB_ENGINE") or os.environ.get("AISHA_DB_BACKEND") or "mysql"
-    ).strip().lower()
+    raw = os.environ.get("DB_ENGINE", "mysql").strip().lower()
     aliases = {
         "mysql": DatabaseBackend.MYSQL,
         "postgres": DatabaseBackend.POSTGRESQL,
@@ -76,74 +75,75 @@ def get_configured_backend() -> DatabaseBackend:
         "pg": DatabaseBackend.POSTGRESQL,
     }
     if raw not in aliases:
-        raise AishaDBError(
-            f"DB_ENGINE / AISHA_DB_BACKEND must be one of {set(aliases.keys())}, got {raw!r}"
-        )
+        raise DBError(f"DB_ENGINE must be one of {set(aliases.keys())}, got {raw!r}")
     return aliases[raw]
 
 
 def resolve_database_url(backend: Optional[DatabaseBackend] = None) -> str:
     """
     Build a SQLAlchemy URL. Precedence:
-    1. DATABASE_URL or AISHA_DATABASE_URL (include dialect, e.g. mysql+pymysql:// or postgresql+psycopg://)
-    2. AISHA_DB_USER, AISHA_DB_PASSWORD, AISHA_DB_HOST, AISHA_DB_PORT, AISHA_DB_NAME
+    1. DATABASE_URL when set and non-empty
+    2. DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME
     """
     _load_dotenv_if_available()
     backend = backend or get_configured_backend()
-    explicit = (
-        os.environ.get("DATABASE_URL") or os.environ.get("AISHA_DATABASE_URL") or ""
-    ).strip()
+    explicit = os.environ.get("DATABASE_URL", "").strip()
     if explicit:
         _validate_url_matches_backend(explicit, backend)
         return explicit
 
-    user = os.environ.get("AISHA_DB_USER", "")
-    password = os.environ.get("AISHA_DB_PASSWORD", "")
-    host = os.environ.get("AISHA_DB_HOST", "localhost")
-    port = os.environ.get("AISHA_DB_PORT", "")
-    db_name = os.environ.get("AISHA_DB_NAME", SCHEMA_NAME)
+    user = os.environ.get("DB_USER", "").strip()
+    password = os.environ.get("DB_PASSWORD", "")
+    host = os.environ.get("DB_HOST", "localhost").strip()
+    port = os.environ.get("DB_PORT", "").strip()
+    db_name = os.environ.get("DB_NAME", "").strip() or SCHEMA_NAME
 
     if not user:
-        raise AishaDBError(
-            "Set DATABASE_URL (or AISHA_DATABASE_URL) or AISHA_DB_USER + AISHA_DB_* for DB access."
+        raise DBError(
+            "Set DATABASE_URL or DB_USER + DB_PASSWORD + DB_HOST (+ DB_NAME) for DB access."
         )
+    if not host:
+        raise DBError("DB_HOST must be set when DATABASE_URL is not used.")
+
+    if not port:
+        port = "3306" if backend == DatabaseBackend.MYSQL else "5432"
 
     user_enc = quote_plus(user)
     pw_enc = quote_plus(password) if password else ""
     auth = f"{user_enc}:{pw_enc}@" if password else f"{user_enc}@"
-    host_port = f"{host}:{port}" if port else host
+    host_port = f"{host}:{port}"
 
     if backend == DatabaseBackend.MYSQL:
-        driver = os.environ.get("AISHA_MYSQL_DRIVER", "pymysql")
+        driver = os.environ.get("MYSQL_DRIVER", "pymysql")
         return f"mysql+{driver}://{auth}{host_port}/{db_name}"
-    driver = os.environ.get("AISHA_PG_DRIVER", "psycopg")
+    driver = os.environ.get("PG_DRIVER", "psycopg")
     return f"postgresql+{driver}://{auth}{host_port}/{db_name}"
 
 
 def _validate_url_matches_backend(url: str, backend: DatabaseBackend) -> None:
     lowered = url.lower()
     if backend == DatabaseBackend.MYSQL and not lowered.startswith("mysql"):
-        raise AishaDBError(
+        raise DBError(
             f"DB_ENGINE is mysql but URL does not start with mysql+... ({url[:48]}...)"
         )
     if backend == DatabaseBackend.POSTGRESQL and not (
         lowered.startswith("postgresql") or lowered.startswith("postgres:/")
     ):
-        raise AishaDBError(
+        raise DBError(
             f"DB_ENGINE is postgresql but URL is not a postgres SQLAlchemy URL ({url[:48]}...)"
         )
 
 
 def _safe_ident_fragment(name: str) -> str:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-        raise AishaDBError(f"Invalid SQL identifier fragment: {name!r}")
+        raise DBError(f"Invalid SQL identifier fragment: {name!r}")
     return name
 
 
 def qualified_table_name(engine: Engine, table: Optional[str] = None) -> str:
     """Dialect-correct `schema.table` for MySQL vs PostgreSQL."""
     schema = _safe_ident_fragment(SCHEMA_NAME)
-    tbl = _safe_ident_fragment(table or TABLE_NAME)
+    tbl = _safe_ident_fragment(table or CONVERSATION_TABLE_NAME)
     if engine.dialect.name == "mysql":
         return f"`{schema}`.`{tbl}`"
     return f'"{schema}"."{tbl}"'
@@ -157,9 +157,6 @@ def _select_columns_sql() -> str:
         COLUMN_USER_MESSAGE,
         COLUMN_ASSISTANT_MESSAGE,
         COLUMN_CREATED_AT,
-        COLUMN_CATEGORY,
-        COLUMN_SCORE,
-        COLUMN_EVALUATION,
     ]
     for p in parts:
         _safe_ident_fragment(p)
@@ -172,29 +169,13 @@ def get_engine(
     backend: Optional[DatabaseBackend] = None,
     pool_pre_ping: bool = True,
 ) -> Engine:
-    """Create a SQLAlchemy engine (callers should `engine.dispose()` when done, or reuse one process-wide)."""
     final_url = url or resolve_database_url(backend)
     return create_engine(final_url, pool_pre_ping=pool_pre_ping)
 
 
-def _parse_evaluation(raw: Any) -> Optional[dict[str, Any]]:
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, (bytes, bytearray)):
-        raw = raw.decode("utf-8")
-    if isinstance(raw, str):
-        raw = raw.strip()
-        if not raw:
-            return None
-        return json.loads(raw)
-    raise TypeError(f"Unexpected evaluation column type: {type(raw)}")
-
-
 @dataclass(frozen=True)
 class ConsultationTurn:
-    """One row / turn in a consultation session."""
+    """One row / turn in a consultation session (user + assistant message pair)."""
 
     id: int
     user_id: int
@@ -202,9 +183,6 @@ class ConsultationTurn:
     user_message: str
     assistant_message: str
     created_at: datetime
-    category: str
-    score: float
-    evaluation: Optional[dict[str, Any]]
 
 
 def _coerce_datetime(value: Any) -> datetime:
@@ -226,17 +204,7 @@ def _coerce_datetime(value: Any) -> datetime:
 
 
 def _row_to_turn(row: Iterable[Any]) -> ConsultationTurn:
-    (
-        rid,
-        user_id,
-        session_id,
-        user_message,
-        assistant_message,
-        created_at,
-        category,
-        score,
-        evaluation_raw,
-    ) = row
+    rid, user_id, session_id, user_message, assistant_message, created_at = row
     return ConsultationTurn(
         id=int(rid),
         user_id=int(user_id),
@@ -244,10 +212,72 @@ def _row_to_turn(row: Iterable[Any]) -> ConsultationTurn:
         user_message=str(user_message or ""),
         assistant_message=str(assistant_message or ""),
         created_at=_coerce_datetime(created_at),
-        category=str(category or ""),
-        score=float(score) if score is not None else 0.0,
-        evaluation=_parse_evaluation(evaluation_raw),
     )
+
+
+def conversation_started_at(turns: list[ConsultationTurn]) -> datetime | None:
+    if not turns:
+        return None
+    return min(t.created_at for t in turns)
+
+
+def conversation_calendar_parts(dt: datetime) -> dict[str, Any]:
+    return {
+        "conversation_day_of_week": dt.strftime("%A"),
+        "conversation_month": dt.month,
+        "conversation_year": dt.year,
+    }
+
+
+def _enum_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    return value
+
+
+def _serialize_db_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return json.dumps(value.model_dump(mode="json"))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, list):
+        if not value:
+            return json.dumps([])
+        if hasattr(value[0], "model_dump"):
+            return json.dumps([v.model_dump(mode="json") for v in value])
+        if isinstance(value[0], Enum):
+            return json.dumps([v.value for v in value])
+        return json.dumps(value)
+    if isinstance(value, dict):
+        return json.dumps(value)
+    return value
+
+
+def _sdoh_barrier_flags(profiles: list[SDoHProfile]) -> tuple[bool, bool, bool]:
+    economic = geographic = social = False
+    economic_barriers = {
+        SDoHBarrier.MEDICATION_COST,
+        SDoHBarrier.CONSULTATION_COST,
+    }
+    geographic_barriers = {SDoHBarrier.TRANSPORTATION}
+    social_barriers = {
+        SDoHBarrier.STIGMA_PRIVACY,
+        SDoHBarrier.CULTURAL_CONFLICT,
+        SDoHBarrier.SECURITY,
+        SDoHBarrier.EMPLOYER_CONSTRAINTS,
+        SDoHBarrier.CHILDCARE,
+    }
+    for profile in profiles:
+        for barrier in profile.barriers_to_care or []:
+            if barrier in economic_barriers:
+                economic = True
+            if barrier in geographic_barriers:
+                geographic = True
+            if barrier in social_barriers:
+                social = True
+    return economic, geographic, social
 
 
 def fetch_conversation_by_session_id(
@@ -255,9 +285,7 @@ def fetch_conversation_by_session_id(
     *,
     engine: Optional[Engine] = None,
 ) -> list[ConsultationTurn]:
-    """
-    Return all turns for a single session, ordered by primary key (conversation order).
-    """
+    """Return all turns for a session, ordered by primary key."""
     own_engine = engine is None
     eng = engine or get_engine()
     try:
@@ -281,81 +309,139 @@ def fetch_conversation_by_session_id(
 def fetch_all_session_ids(
     *,
     engine: Optional[Engine] = None,
+    min_turns: int | None = None,
 ) -> list[int]:
     """
-    Distinct session ids for all rows, sorted ascending (stable for batch jobs).
-    """
+    Distinct session ids with at least `min_turns` rows (user–assistant pairs).
+  """
+    min_turns = min_turns if min_turns is not None else min_conversation_turns()
     own_engine = engine is None
     eng = engine or get_engine()
     try:
         sid = _safe_ident_fragment(COLUMN_SESSION_ID)
         q = text(
             f"""
-            SELECT DISTINCT {sid}
+            SELECT {sid}
             FROM {qualified_table_name(eng)}
+            GROUP BY {sid}
+            HAVING COUNT(*) >= :min_turns
             ORDER BY {sid} ASC
             """
         )
         with eng.connect() as conn:
-            rows = conn.execute(q).fetchall()
+            rows = conn.execute(q, {"min_turns": min_turns}).fetchall()
         return [int(r[0]) for r in rows]
     finally:
         if own_engine:
             eng.dispose()
 
 
+def _analysis_insert_params(
+    *,
+    session_id: int | str,
+    user_phone: str,
+    model_name: str,
+    analysis: ConversationAnalysis,
+    created_at: datetime,
+    conversation_started: datetime | None,
+) -> list[dict[str, Any]]:
+    conv_time = conversation_started or created_at
+    calendar = conversation_calendar_parts(conv_time)
+    sdoh_economic, sdoh_geographic, sdoh_social = _sdoh_barrier_flags(analysis.sdoh_profiles)
+    cultural_notes = analysis.cultural_notes or ""
+
+    rows: list[dict[str, Any]] = []
+    segments = analysis.topic_segments or []
+    if not segments:
+        return []
+
+    for i, segment in enumerate(segments):
+        row: dict[str, Any] = {
+            "session_id": session_id,
+            "user_phone": user_phone,
+            "model_name": model_name,
+            "segment_index": i + 1,
+            "clinical_category": _enum_value(getattr(segment, "clinical_category", None)),
+            "intent": _serialize_db_value(getattr(segment, "intent", None)),
+            "pharmacology_profiles": _serialize_db_value(
+                getattr(segment, "pharmacology_profiles", None)
+            ),
+            "mental_health_profiles": _serialize_db_value(
+                getattr(segment, "mental_health_profiles", None)
+            ),
+            "suspected_condition": _serialize_db_value(
+                getattr(segment, "suspected_condition", None)
+            ),
+            "symptoms_reported": _serialize_db_value(
+                getattr(segment, "symptoms_reported", None)
+            ),
+            "urgency_level": _enum_value(getattr(segment, "urgency_level", None)),
+            "barriers": _serialize_db_value(getattr(segment, "barriers", None) or []),
+            "cultural_tags": _serialize_db_value(getattr(segment, "cultural_tags", None)),
+            "outcome_referral": _enum_value(getattr(segment, "outcome_referral", None)),
+            "literacy_score": getattr(segment, "literacy_score", None),
+            "cultural_notes": cultural_notes,
+            "sdoh_profiles": _serialize_db_value(analysis.sdoh_profiles),
+            "sdoh_economic_barrier": sdoh_economic,
+            "sdoh_geographic_barrier": sdoh_geographic,
+            "sdoh_social_barrier": sdoh_social,
+            "created_at": created_at,
+            "analysis_timestamp": conv_time,
+            **calendar,
+        }
+        rows.append(row)
+    return rows
+
+
 def insert_conversation_analysis(
     session_id: int | str,
     user_phone: str,
     model_name: str,
-    analysis: AishaConversationAnalysis,
+    analysis: ConversationAnalysis,
     *,
     engine: Optional[Engine] = None,
     created_at: Optional[datetime] = None,
+    conversation_started: Optional[datetime] = None,
 ) -> None:
-    """
-    Persist one analysis row to `schema.aisha_conversation_analysis`.
-
-    Top-level LLM fields map to columns; `segments` is stored as JSON.
-    """
+    """Persist one analysis as one row per topic segment (flattened columns)."""
     own_engine = engine is None
     eng = engine or get_engine()
     created_at = created_at or datetime.now(timezone.utc)
-    segments_payload = json.dumps(analysis.model_dump(mode="json")["segments"])
-    sdoh = analysis.sdoh_indicators
+    params_list = _analysis_insert_params(
+        session_id=session_id,
+        user_phone=user_phone,
+        model_name=model_name,
+        analysis=analysis,
+        created_at=created_at,
+        conversation_started=conversation_started,
+    )
+    if not params_list:
+        return
     tbl = qualified_table_name(eng, ANALYSIS_TABLE_NAME)
     q = text(
         f"""
         INSERT INTO {tbl} (
-            session_id, user_phone, model_name, created_at,
-            conversation_id, analysis_timestamp, user_persona, segments,
+            session_id, user_phone, model_name, segment_index,
+            clinical_category, intent, pharmacology_profiles, mental_health_profiles,
+            suspected_condition, symptoms_reported, urgency_level, barriers, cultural_tags,
+            outcome_referral, literacy_score, cultural_notes, sdoh_profiles,
             sdoh_economic_barrier, sdoh_geographic_barrier, sdoh_social_barrier,
-            outcome_referral
+            created_at, analysis_timestamp,
+            conversation_day_of_week, conversation_month, conversation_year
         ) VALUES (
-            :session_id, :user_phone, :model_name, :created_at,
-            :conversation_id, :analysis_timestamp, :user_persona, :segments,
+            :session_id, :user_phone, :model_name, :segment_index,
+            :clinical_category, :intent, :pharmacology_profiles, :mental_health_profiles,
+            :suspected_condition, :symptoms_reported, :urgency_level, :barriers, :cultural_tags,
+            :outcome_referral, :literacy_score, :cultural_notes, :sdoh_profiles,
             :sdoh_economic_barrier, :sdoh_geographic_barrier, :sdoh_social_barrier,
-            :outcome_referral
+            :created_at, :analysis_timestamp,
+            :conversation_day_of_week, :conversation_month, :conversation_year
         )
         """
     )
-    params = {
-        "session_id": session_id,
-        "user_phone": user_phone,
-        "model_name": model_name,
-        "created_at": created_at,
-        "conversation_id": analysis.conversation_id,
-        "analysis_timestamp": analysis.timestamp,
-        "user_persona": analysis.user_persona,
-        "segments": segments_payload,
-        "sdoh_economic_barrier": sdoh.economic_barrier,
-        "sdoh_geographic_barrier": sdoh.geographic_barrier,
-        "sdoh_social_barrier": sdoh.social_barrier,
-        "outcome_referral": analysis.outcome_referral,
-    }
     try:
         with eng.begin() as conn:
-            conn.execute(q, params)
+            conn.execute(q, params_list)
     finally:
         if own_engine:
             eng.dispose()
