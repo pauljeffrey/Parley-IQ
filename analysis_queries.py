@@ -183,22 +183,6 @@ ANALYSIS_COLUMN_SPECS: tuple[ColumnSpec, ...] = (
 
 ANALYSIS_SELECTABLE_COLUMNS: frozenset[str] = frozenset(spec.name for spec in ANALYSIS_COLUMN_SPECS)
 
-# Handy default projections for the analytics agent.
-DEFAULT_SUMMARY_COLUMNS: tuple[str, ...] = (
-    "session_id",
-    "segment_index",
-    "clinical_category",
-    "urgency_level",
-    "outcome_referral",
-    "literacy_score",
-    "sdoh_economic_barrier",
-    "sdoh_geographic_barrier",
-    "sdoh_social_barrier",
-    "conversation_day_of_week",
-    "conversation_month",
-    "conversation_year",
-)
-
 _FORBIDDEN_SQL = re.compile(
     r"\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|"
     r"EXEC|EXECUTE|CALL|COMMENT|COPY|DETACH)\b",
@@ -211,13 +195,6 @@ _JOIN_PATTERN = re.compile(r"\bJOIN\b", re.IGNORECASE)
 def analysis_table_must_match_substrings() -> tuple[str, str]:
     """Schema and table tokens that validated SQL must reference."""
     return SCHEMA_NAME.strip(), ANALYSIS_TABLE_NAME.strip()
-
-
-def _format_column_catalog() -> str:
-    lines: list[str] = []
-    for spec in ANALYSIS_COLUMN_SPECS:
-        lines.append(f"- {spec.name} ({spec.sql_type}): {spec.description}")
-    return "\n".join(lines)
 
 
 def conversation_analysis_columns_table() -> str:
@@ -322,16 +299,6 @@ def _validate_categorical_filters(where_equal: dict[str, Any]) -> None:
                 f"literacy_score must be an integer "
                 f"between {LITERACY_SCORE_MIN} and {LITERACY_SCORE_MAX}."
             )
-
-
-def schema_documentation(engine: Engine) -> str:
-    """Full schema text (instructions + dialect-qualified `FROM` target)."""
-    fq = qualified_analysis_table(engine)
-    return (
-        f"{analytics_agent_instructions(qualified_table=fq)}\n\n"
-        f"## Example SQL\n\n"
-        f"  SELECT outcome_referral, COUNT(*) AS n FROM {fq} GROUP BY outcome_referral\n"
-    )
 
 
 def validate_read_select(sql: str) -> str:

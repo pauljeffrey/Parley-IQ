@@ -308,14 +308,16 @@ class DrugClass(Enum):
     # --- Catch-all ---
     OTHER = "Other"
 
+class Immunization(BaseModel):
+    vaccine: str = Field(..., description="Standardized vaccine name.")
+    npi_status: NPIStatus
+    missing_vaccines: List[str] = []
 
 class PharmacologyProfile(BaseModel):
-    drug: str
+    drug: str = Field(..., description="Standardized drug name.")
     drug_class: DrugClass
-    # NPI / Immunization
-    npi_status: NPIStatus= None
-    missing_vaccines: List[str] = []
     
+    dosage: str = Field(..., description="Standardized dosage of the drug.")
     # Antibiotic Use (Crucial for AMR tracking)
     purpose_of_drug: Optional[str] = None
     n_doses_taken: int
@@ -366,6 +368,7 @@ class AnalysisSegment(BaseModel):
     intent: IntentPerformance
 
     pharmacology_profiles: Optional[PharmacologyProfiles] = None
+    immunization_profiles: Optional[List[Immunization]] = None
     mental_health_profiles: Optional[List[MentalHealthCrisis]] = None
     suspected_condition: Optional[List[str]] = Field(
         "", description="Standardized condition label- ICD-11 in descending order of likelihood."
@@ -373,10 +376,7 @@ class AnalysisSegment(BaseModel):
     symptoms_reported: Optional[List[SymptomNature]] = Field(default_factory=list)
     urgency_level: Optional[UrgencyLevel] = None
     barriers: List[SDoHBarrier] = Field(default_factory=list)
-    cultural_tags: Optional[CulturalTag] = Field(
-        default_factory=list,
-        description="Cultural tags",
-    )
+    cultural_tags: Optional[CulturalTag] = None
     outcome_referral: OutcomeReferral
     literacy_score: int = Field(
         ge=1,
@@ -390,10 +390,9 @@ class ConversationAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
     topic_segments: List[AnalysisSegment]
     sdoh_profiles: List[SDoHProfile]
-    cultural_notes: str
-    
+    cultural_notes: str = ""
 
     @classmethod
-    def openai_json_schema(cls) -> dict:
-        """JSON Schema for `response_format` / structured outputs tooling."""
+    def llm_json_schema(cls) -> dict:
+        """JSON Schema for Batch/Chat API (clinical fields only; no DB ids)."""
         return cls.model_json_schema()

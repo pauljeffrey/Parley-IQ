@@ -13,7 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Iterable, Optional
 from urllib.parse import quote_plus
@@ -64,6 +64,21 @@ def min_conversation_turns() -> int:
         return max(1, int(raw))
     except ValueError:
         return 5
+
+
+def batch_conversation_since() -> datetime | None:
+    """Optional lower bound on session activity (`MAX(created_at)`), from env."""
+    days_raw = os.environ.get("BATCH_CONVERSATION_SINCE_DAYS", "").strip()
+    if days_raw:
+        try:
+            return datetime.now(timezone.utc) - timedelta(days=max(1, int(days_raw)))
+        except ValueError:
+            pass
+    iso = os.environ.get("BATCH_CONVERSATION_SINCE", "").strip()
+    if not iso:
+        return None
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def get_configured_backend() -> DatabaseBackend:
@@ -221,6 +236,32 @@ def conversation_started_at(turns: list[ConsultationTurn]) -> datetime | None:
     return min(t.created_at for t in turns)
 
 
+def consultation_user_identifier(turns: list[ConsultationTurn]) -> str:
+    """Caller id from the conversation table (`user_id` on the first turn)."""
+    if not turns:
+        return ""
+    return str(turns[0].user_id)
+
+
+def _segment_pharmacology_column(segment: Any) -> Any:
+    """JSON for `pharmacology_profiles` column (drug profiles + immunizations)."""
+    pharma = getattr(segment, "pharmacology_profiles", None)
+    imm = getattr(segment, "immunization_profiles", None)
+    if pharma is None and not imm:
+        return None
+    payload: dict[str, Any] = {}
+    if pharma is not None:
+        if hasattr(pharma, "model_dump"):
+            payload.update(pharma.model_dump(mode="json"))
+        elif isinstance(pharma, dict):
+            payload.update(pharma)
+    if imm:
+        payload["immunization_profiles"] = [
+            i.model_dump(mode="json") if hasattr(i, "model_dump") else i for i in imm
+        ]
+    return payload
+
+
 def conversation_calendar_parts(dt: datetime) -> dict[str, Any]:
     return {
         "conversation_day_of_week": dt.strftime("%A"),
@@ -310,27 +351,83 @@ def fetch_all_session_ids(
     *,
     engine: Optional[Engine] = None,
     min_turns: int | None = None,
+    since: datetime | None = None,
 ) -> list[int]:
-    """
-    Distinct session ids with at least `min_turns` rows (user–assistant pairs).
-  """
+    """Distinct session ids with >= `min_turns` rows; optional `since` on MAX(created_at)."""
     min_turns = min_turns if min_turns is not None else min_conversation_turns()
+    since = since if since is not None else batch_conversation_since()
+    own_engine = engine is None
+    eng = engine or get_engine()
+    try:
+        sid = _safe_ident_fragment(COLUMN_SESSION_ID)
+        cat = _safe_ident_fragment(COLUMN_CREATED_AT)
+        having = ["COUNT(*) >= :min_turns"]
+        binds: dict[str, Any] = {"min_turns": min_turns}
+        if since is not None:
+            having.append(f"MAX({cat}) >= :since")
+            binds["since"] = since
+        q = text(
+            f"""
+            SELECT {sid}
+            FROM {qualified_table_name(eng)}
+            GROUP BY {sid}
+            HAVING {" AND ".join(having)}
+            ORDER BY {sid} ASC
+            """
+        )
+        with eng.connect() as conn:
+            rows = conn.execute(q, binds).fetchall()
+        return [int(r[0]) for r in rows]
+    finally:
+        if own_engine:
+            eng.dispose()
+
+
+def fetch_analyzed_session_ids(*, engine: Optional[Engine] = None) -> set[str]:
+    """Distinct session_id values already present in the analysis table."""
     own_engine = engine is None
     eng = engine or get_engine()
     try:
         sid = _safe_ident_fragment(COLUMN_SESSION_ID)
         q = text(
             f"""
-            SELECT {sid}
-            FROM {qualified_table_name(eng)}
-            GROUP BY {sid}
-            HAVING COUNT(*) >= :min_turns
-            ORDER BY {sid} ASC
+            SELECT DISTINCT {sid}
+            FROM {qualified_table_name(eng, ANALYSIS_TABLE_NAME)}
             """
         )
         with eng.connect() as conn:
-            rows = conn.execute(q, {"min_turns": min_turns}).fetchall()
-        return [int(r[0]) for r in rows]
+            rows = conn.execute(q).fetchall()
+        return {str(r[0]) for r in rows}
+    finally:
+        if own_engine:
+            eng.dispose()
+
+
+def fetch_analysis_segments_matching_suspected(
+    needle: str,
+    *,
+    engine: Optional[Engine] = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Rows whose `suspected_condition` JSON/text contains `needle` (case-insensitive)."""
+    own_engine = engine is None
+    eng = engine or get_engine()
+    tbl = qualified_table_name(eng, ANALYSIS_TABLE_NAME)
+    lim_sql = f" LIMIT {int(limit)}" if limit else ""
+    q = text(
+        f"""
+        SELECT session_id, segment_index, suspected_condition, clinical_category,
+               urgency_level, analysis_timestamp, created_at
+        FROM {tbl}
+        WHERE LOWER(suspected_condition) LIKE :pat
+        ORDER BY analysis_timestamp DESC
+        {lim_sql}
+        """
+    )
+    try:
+        with eng.connect() as conn:
+            rows = conn.execute(q, {"pat": f"%{needle.strip().lower()}%"}).fetchall()
+        return [dict(r._mapping) for r in rows]
     finally:
         if own_engine:
             eng.dispose()
@@ -345,7 +442,9 @@ def _analysis_insert_params(
     created_at: datetime,
     conversation_started: datetime | None,
 ) -> list[dict[str, Any]]:
-    conv_time = conversation_started or created_at
+    if conversation_started is None:
+        return []
+    conv_time = conversation_started
     calendar = conversation_calendar_parts(conv_time)
     sdoh_economic, sdoh_geographic, sdoh_social = _sdoh_barrier_flags(analysis.sdoh_profiles)
     cultural_notes = analysis.cultural_notes or ""
@@ -363,9 +462,7 @@ def _analysis_insert_params(
             "segment_index": i + 1,
             "clinical_category": _enum_value(getattr(segment, "clinical_category", None)),
             "intent": _serialize_db_value(getattr(segment, "intent", None)),
-            "pharmacology_profiles": _serialize_db_value(
-                getattr(segment, "pharmacology_profiles", None)
-            ),
+            "pharmacology_profiles": _serialize_db_value(_segment_pharmacology_column(segment)),
             "mental_health_profiles": _serialize_db_value(
                 getattr(segment, "mental_health_profiles", None)
             ),
@@ -404,6 +501,10 @@ def insert_conversation_analysis(
     conversation_started: Optional[datetime] = None,
 ) -> None:
     """Persist one analysis as one row per topic segment (flattened columns)."""
+    if ANALYSIS_TABLE_NAME.strip().lower() == CONVERSATION_TABLE_NAME.strip().lower():
+        raise DBError(
+            "ANALYSIS_TABLE and CONVERSATION_TABLE must be different table names in configuration."
+        )
     own_engine = engine is None
     eng = engine or get_engine()
     created_at = created_at or datetime.now(timezone.utc)

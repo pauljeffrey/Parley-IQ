@@ -1,0 +1,6 @@
+.env
+batch_work/
+batch_completed_sessions.json
+__pycache__/
+*.pyc
+.venv/
