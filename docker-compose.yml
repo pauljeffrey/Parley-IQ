@@ -1,0 +1,24 @@
+# Local MySQL matching app config: connects to DB_NAME; tables live in DB_SCHEMA (`public`).
+# Usage: set MYSQL_ROOT_PASSWORD (or use default in compose), then:
+#   docker compose up -d
+#   py scripts/seed_conversations.py
+#   py run.py
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-devroot}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - parley_mysql_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
+
+volumes:
+  parley_mysql_data:
