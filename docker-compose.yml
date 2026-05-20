@@ -1,6 +1,6 @@
 # Local MySQL matching app config: connects to DB_NAME; tables live in DB_SCHEMA (`public`).
 # Usage: set MYSQL_ROOT_PASSWORD (or use default in compose), then:
-#   docker compose up -d
+#   docker compose up -d    # must use -d; foreground `up` stops DB when you Ctrl+C
 #   py scripts/seed_conversations.py
 #   py run.py
 services:

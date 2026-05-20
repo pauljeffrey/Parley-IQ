@@ -498,6 +498,27 @@ def fetch_analyzed_session_ids(*, engine: Optional[Engine] = None) -> set[str]:
             eng.dispose()
 
 
+def fetch_recent_analysis_rows(
+    *,
+    engine: Optional[Engine] = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Latest rows from the analysis table (newest `id` first)."""
+    own_engine = engine is None
+    eng = engine or get_engine()
+    create_analysis_table_if_not_exists(eng)
+    tbl = qualified_table_name(eng, ANALYSIS_TABLE_NAME)
+    lim = max(1, int(limit))
+    q = text(f"SELECT * FROM {tbl} ORDER BY id DESC LIMIT {lim}")
+    try:
+        with eng.connect() as conn:
+            rows = conn.execute(q).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        if own_engine:
+            eng.dispose()
+
+
 def fetch_analysis_segments_matching_suspected(
     needle: str,
     *,

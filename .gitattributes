@@ -1,1 +1,1 @@
-docker/mysql/init/*.sh text eol=lf
+docker/mysql/init/* text eol=lf

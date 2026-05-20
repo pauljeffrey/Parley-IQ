@@ -371,7 +371,7 @@ class AnalysisSegment(BaseModel):
     immunization_profiles: Optional[List[Immunization]] = None
     mental_health_profiles: Optional[List[MentalHealthCrisis]] = None
     suspected_condition: Optional[List[str]] = Field(
-        "", description="Standardized condition label- ICD-11 in descending order of likelihood (max 3 conditions)."
+        "", description="Standardized condition Name (According to ICD-11) in descending order of likelihood (max 3 conditions). Don't add the icd code."
     )
     symptoms_reported: Optional[List[SymptomNature]] = Field(default_factory=list)
     urgency_level: Optional[UrgencyLevel] = None
