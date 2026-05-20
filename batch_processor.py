@@ -352,6 +352,10 @@ def _coerce_conversation_analysis(data: dict[str, Any]) -> tuple[ConversationAna
         cleaned["sdoh_profiles"] = []
     if "cultural_notes" not in cleaned:
         cleaned["cultural_notes"] = None
+    if "topics_enquired" not in cleaned:
+        cleaned["topics_enquired"] = []
+    if "diseases_enquired" not in cleaned:
+        cleaned["diseases_enquired"] = []
 
     try:
         return ConversationAnalysis.model_validate(cleaned), None

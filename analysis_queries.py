@@ -135,6 +135,16 @@ ANALYSIS_COLUMN_SPECS: tuple[ColumnSpec, ...] = (
         "Conversation-level cultural notes (`output.CulturalNotes`, repeated on each segment row).",
     ),
     ColumnSpec(
+        "topics_enquired",
+        "JSON/TEXT",
+        "Conversation-level topics the user inquired about (`output.ConversationAnalysis.topics_enquired`).",
+    ),
+    ColumnSpec(
+        "diseases_enquired",
+        "JSON/TEXT",
+        "Conversation-level diseases the user inquired about (`output.ConversationAnalysis.diseases_enquired`).",
+    ),
+    ColumnSpec(
         "sdoh_profiles",
         "JSON/TEXT",
         "Full list of SDoH profile objects for the conversation.",

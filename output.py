@@ -423,7 +423,13 @@ class ConversationAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
     topic_segments: List[AnalysisSegment]
     sdoh_profiles: List[SDoHProfile]
-    cultural_notes: CulturalNotes = None
+    cultural_notes: Optional[CulturalNotes] = None
+    topics_enquired: List[str] = Field(
+        default_factory=list, description="Topics the user inquired about."
+    )
+    diseases_enquired: List[str] = Field(
+        default_factory=list, description="Diseases the user inquired about."
+    )
 
     @classmethod
     def llm_json_schema(cls) -> dict:

@@ -189,6 +189,8 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
             outcome_referral VARCHAR(255),
             literacy_score INT,
             cultural_notes JSON,
+            topics_enquired JSON,
+            diseases_enquired JSON,
             sdoh_profiles JSON,
             sdoh_economic_barrier BOOLEAN,
             sdoh_geographic_barrier BOOLEAN,
@@ -221,6 +223,8 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
             outcome_referral TEXT,
             literacy_score INT,
             cultural_notes JSONB,
+            topics_enquired JSONB,
+            diseases_enquired JSONB,
             sdoh_profiles JSONB,
             sdoh_economic_barrier BOOLEAN,
             sdoh_geographic_barrier BOOLEAN,
@@ -242,6 +246,20 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
                 conn.execute(text(f"ALTER TABLE {qualified} ALTER COLUMN session_id TYPE TEXT"))
         except Exception:
             pass  # Ignore migration failures if already correct or lacking permissions
+        _ensure_analysis_extra_columns(conn, qualified, engine.dialect.name)
+
+
+def _ensure_analysis_extra_columns(conn: Any, qualified: str, dialect: str) -> None:
+    """Add conversation-level JSON columns introduced after initial table creation."""
+    json_type = "JSON" if dialect == "mysql" else "JSONB"
+    for col in ("topics_enquired", "diseases_enquired"):
+        _safe_ident_fragment(col)
+        try:
+            conn.execute(
+                text(f"ALTER TABLE {qualified} ADD COLUMN {col} {json_type} NULL")
+            )
+        except Exception:
+            pass
 
 
 def _select_columns_sql() -> str:
@@ -564,6 +582,8 @@ def _analysis_insert_params(
     calendar = conversation_calendar_parts(conv_time)
     sdoh_economic, sdoh_geographic, sdoh_social = _sdoh_barrier_flags(analysis.sdoh_profiles)
     cultural_notes = _serialize_db_value(analysis.cultural_notes)
+    topics_enquired = _serialize_db_value(analysis.topics_enquired)
+    diseases_enquired = _serialize_db_value(analysis.diseases_enquired)
 
     rows: list[dict[str, Any]] = []
     segments = analysis.topic_segments or []
@@ -594,6 +614,8 @@ def _analysis_insert_params(
             "outcome_referral": _enum_value(getattr(segment, "outcome_referral", None)),
             "literacy_score": getattr(segment, "literacy_score", None),
             "cultural_notes": cultural_notes,
+            "topics_enquired": topics_enquired,
+            "diseases_enquired": diseases_enquired,
             "sdoh_profiles": _serialize_db_value(analysis.sdoh_profiles),
             "sdoh_economic_barrier": sdoh_economic,
             "sdoh_geographic_barrier": sdoh_geographic,
@@ -643,15 +665,16 @@ def insert_conversation_analysis(
                 session_id, user_phone, model_name, segment_index,
                 clinical_category, intent, pharmacology_profiles, mental_health_profiles,
                 suspected_condition, symptoms_reported, urgency_level, barriers, cultural_tags,
-                outcome_referral, literacy_score, cultural_notes, sdoh_profiles,
-                sdoh_economic_barrier, sdoh_geographic_barrier, sdoh_social_barrier,
+                outcome_referral, literacy_score, cultural_notes, topics_enquired, diseases_enquired,
+                sdoh_profiles, sdoh_economic_barrier, sdoh_geographic_barrier, sdoh_social_barrier,
                 created_at, analysis_timestamp,
                 conversation_day_of_week, conversation_month, conversation_year
             ) VALUES (
                 :session_id, :user_phone, :model_name, :segment_index,
                 :clinical_category, :intent, :pharmacology_profiles, :mental_health_profiles,
                 :suspected_condition, :symptoms_reported, :urgency_level, :barriers, :cultural_tags,
-                :outcome_referral, :literacy_score, :cultural_notes, :sdoh_profiles,
+                :outcome_referral, :literacy_score, :cultural_notes, :topics_enquired, :diseases_enquired,
+                :sdoh_profiles,
                 :sdoh_economic_barrier, :sdoh_geographic_barrier, :sdoh_social_barrier,
                 :created_at, :analysis_timestamp,
                 :conversation_day_of_week, :conversation_month, :conversation_year
