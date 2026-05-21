@@ -74,9 +74,10 @@ class SDoHBarrier(Enum):
     HEALTH_LITERACY = "Low Health Literacy"
     DIGITAL_BARRIER = "Digital Literacy/Access"
     CULTURAL_CONFLICT = "Religious/Cultural Conflict"
-    SECURITY = "Security/Safety in Area"
+    SECURITY = "Area Safety"
     EMPLOYER_CONSTRAINTS = "Employer Constraints"
     CHILDCARE = "Lack of Childcare"
+    OTHERS = "Others"
 
 class EconomicStatus(Enum):
     INDIGENT = "Indigent"
@@ -99,7 +100,7 @@ class Tag(Enum):
     LOCAL_JARGON = "Local Terminology (e.g., Agbo, Jedijedi)"
     TRADITIONAL_MEDICINE = "Herbal/Traditional Medicine Reference"
     CAREGIVER_PROXY = "Query for Third Party (Child/Parent)"
-    SPIRITUAL_ATTRIBUTION = "Spiritual/Supernatural Attribution"
+    SPIRITUAL_ATTRIBUTION = "Supernatural Attribution"
 
 class CulturalTag(BaseModel):
     tags: List[Tag] = None
@@ -114,22 +115,22 @@ class Severity(Enum):
 class Frequency(Enum):
     CONSTANT = "Constant"
     INTERMITTENT = "Intermittent"
-    PAROXYSMAL = "Paroxysmal (Sudden attacks)"
+    PAROXYSMAL = "Paroxysmal"
     # Timing / Triggers
-    NOCTURNAL = "Nocturnal (Night only / night-time only)"
-    DIURNAL_VARIATION = "Diurnal (Worse at specific times of day, e.g., morning stiffness)"
-    POST_PRANDIAL = "Post-Prandial (After eating / meals)"
-    EXERTIONAL = "Exertional (Triggered by physical activity)"
+    NOCTURNAL = "Nocturnal"
+    DIURNAL_VARIATION = "Diurnal"
+    POST_PRANDIAL = "Post-Prandial"
+    EXERTIONAL = "Exertional"
     
     # Periodicity
-    CYCLICAL = "Cyclical (e.g., Menstrual/Catamenial or seasonal)"
-    PERIODIC = "Periodic (Occurs at regular intervals, e.g., every 4 hours)"
-    RANDOM = "Random / Erratic"
+    CYCLICAL = "Cyclical"
+    PERIODIC = "Periodic"
+    RANDOM = "Random"
 
     # Progression (Temporal Distribution of Severity)
-    CRESCENDO = "Crescendo (Increasing in frequency or intensity)"
-    DECRESCENDO = "Decrescendo (Waning frequency or intensity)"
-    FLUCTUATING = "Fluctuating (Waxing and waning)"
+    CRESCENDO = "Crescendo"
+    DECRESCENDO = "Decrescendo"
+    FLUCTUATING = "Fluctuating"
     
 class SpecialSenses(Enum):
     VISION = "Vision"
@@ -224,7 +225,7 @@ class SymptomNature(BaseModel):
     severity: Severity
     frequency: Frequency
     duration: int
-    character: Optional[Dict] = Field(None, description="nature/quality of symptom: e.g., Sharp, Dull, Burning")
+    character: Optional[Dict] = Field(None, description="nature/quality of symptom")
     progression: Literal["Improving", "Worsening", "Stable"] = "Stable"
 
 #### NPI STATUS AND COMPLIANCE LEVEL
@@ -232,7 +233,7 @@ class NPIStatus(Enum):
     UP_TO_DATE = "Up to Date"
     PARTIAL = "Partially Vaccinated"
     UNVACCINATED = "Unvaccinated"
-    UNKNOWN = "Unknown/Not Mentioned"
+    UNKNOWN = "Unknown"
 
 class ComplianceLevel(Enum):
     FULL = "Full Adherence"
@@ -263,7 +264,7 @@ class DrugClass(Enum):
     # --- Cardiovascular System ---
     ANTIHYPERTENSIVE = "Antihypertensive"
     DIURETIC = "Diuretic"
-    STATIN = "Statin / Antihyperlipidemic"
+    STATIN = "Antihyperlipidemic"
     ANTICOAGULANT = "Anticoagulant"
     ANTIPLATELET = "Antiplatelet"
     ANTIARRHYTHMIC = "Antiarrhythmic"
@@ -271,8 +272,8 @@ class DrugClass(Enum):
     # --- Central Nervous System & Psychiatry ---
     ANTIDEPRESSANT = "Antidepressant"
     ANTIPSYCHOTIC = "Antipsychotic"
-    ANXIOLYTIC = "Anxiolytic / Sedative"
-    ANTICONVULSANT = "Anticonvulsant / Mood Stabilizer"
+    ANXIOLYTIC = "Anxiolytic"
+    ANTICONVULSANT = "Anticonvulsant"
     CNS_STIMULANT = "CNS Stimulant"
     
     # --- Respiratory System ---
@@ -360,8 +361,6 @@ OutcomeReferral = Literal[
 ]
 
 class AnalysisSegment(BaseModel):
-    """One segment in `ConversationAnalysis.segments`."""
-
     model_config = ConfigDict(extra="forbid")
 
     clinical_category: ClinicalTaxonomy
@@ -381,7 +380,7 @@ class AnalysisSegment(BaseModel):
     literacy_score: int = Field(
         ge=1,
         le=5,
-        description="user literacy level:1–5; 1 is illiterate and 5 is highly medical / fluent.",
+        description="user literacy level:1–5.",
     )
 
 
@@ -421,8 +420,8 @@ class ConversationAnalysis(BaseModel):
     """Structured output shape for conversation analysis (persisted + OpenAI schema)."""
 
     model_config = ConfigDict(extra="forbid")
-    topic_segments: List[AnalysisSegment]
-    sdoh_profiles: List[SDoHProfile]
+    topic_segments: List[AnalysisSegment] = Field(default_factory=list, description="Analysis for identified, independent segments of the conversation.")
+    sdoh_profiles: List[SDoHProfile] = Field(default_factory=list, description="Profiles of the user's socioeconomic status.")
     cultural_notes: Optional[CulturalNotes] = None
     topics_enquired: List[str] = Field(
         default_factory=list, description="Topics the user inquired about."
