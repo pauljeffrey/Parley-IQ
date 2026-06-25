@@ -7,6 +7,7 @@ import builtins
 import datetime as datetime_mod
 import io
 import json as json_mod
+import mimetypes
 import os
 import pathlib
 import re
@@ -14,6 +15,7 @@ import traceback
 import zipfile
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
+from typing import Literal
 
 import matplotlib
 
@@ -85,6 +87,26 @@ _ALLOWED_BUILTINS_NAMES = frozenset(
 
 FILENAME_SAFE = re.compile(r"^[A-Za-z0-9_\-.]+\.(png|jpg|jpeg|pdf|svg)$")
 
+ChartType = Literal["bar", "horizontal_bar", "line", "pie"]
+
+_CONTENT_TYPE_BY_SUFFIX = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".pdf": "application/pdf",
+    ".svg": "image/svg+xml",
+}
+
+
+@dataclass(frozen=True)
+class EncodedFigure:
+    """One plot artifact ready for API clients."""
+
+    filename: str
+    relative_path: str
+    content_type: str
+    data_base64: str
+
 
 @dataclass
 class AnalyticsAgentDeps:
@@ -100,6 +122,88 @@ class AnalyticsAgentDeps:
         posix = rel.as_posix()
         if posix not in self.artifact_relpaths:
             self.artifact_relpaths.append(posix)
+
+
+def content_type_for_artifact(path: pathlib.Path | str) -> str:
+    suffix = pathlib.Path(path).suffix.lower()
+    return _CONTENT_TYPE_BY_SUFFIX.get(suffix) or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+
+def _resolve_plot_output(work_dir: pathlib.Path, filename: str) -> pathlib.Path:
+    if not FILENAME_SAFE.match(filename):
+        raise ValueError("filename must be ascii-safe with extension png|jpg|jpeg|pdf|svg")
+    plots_dir = work_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    out_path = (plots_dir / filename).resolve()
+    if plots_dir.resolve() not in out_path.parents:
+        raise PermissionError("Invalid plot path.")
+    return out_path
+
+
+def _plot_query_helpers(engine: Engine) -> dict:
+    def run_select(sql: str) -> list[dict]:
+        return aq.run_validated_select(sql=sql, engine=engine)
+
+    def load_analysis_df(lim: int | None = None) -> pd.DataFrame:
+        return aq.load_analysis_dataframe(engine=engine, limit=lim)
+
+    return {"run_select": run_select, "load_analysis_df": load_analysis_df}
+
+
+def _save_chart_from_dataframe(
+    df: pd.DataFrame,
+    *,
+    chart_type: ChartType,
+    x_column: str,
+    y_column: str,
+    title: str,
+    out_path: pathlib.Path,
+) -> None:
+    if df.empty:
+        raise ValueError("Query returned no rows; cannot chart an empty result.")
+    if x_column not in df.columns or y_column not in df.columns:
+        raise ValueError(
+            f"Expected columns {x_column!r} and {y_column!r}; got {list(df.columns)}."
+        )
+
+    plt.close("all")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    x_vals = df[x_column]
+    y_vals = pd.to_numeric(df[y_column], errors="coerce")
+    if y_vals.isna().all():
+        raise ValueError(f"Column {y_column!r} must contain numeric values for charting.")
+
+    if chart_type == "bar":
+        ax.bar(x_vals.astype(str), y_vals)
+        ax.set_xlabel(x_column)
+        ax.set_ylabel(y_column)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    elif chart_type == "horizontal_bar":
+        ax.barh(x_vals.astype(str), y_vals)
+        ax.set_xlabel(y_column)
+        ax.set_ylabel(x_column)
+    elif chart_type == "line":
+        ax.plot(x_vals, y_vals, marker="o")
+        ax.set_xlabel(x_column)
+        ax.set_ylabel(y_column)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    elif chart_type == "pie":
+        ax.pie(y_vals, labels=x_vals.astype(str), autopct="%1.1f%%")
+    else:
+        raise ValueError(f"Unsupported chart_type: {chart_type!r}")
+
+    ax.set_title(title)
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _persist_plot_artifact(ctx: RunContext[AnalyticsAgentDeps], out_path: pathlib.Path) -> str:
+    if not out_path.is_file() or out_path.stat().st_size <= 0:
+        return "Figure was not persisted; ensure the plot was rendered before saving."
+    ctx.deps.record_artifact(out_path)
+    rel = out_path.relative_to(ctx.deps.work_dir)
+    return f"Saved plot artifact at `{rel.as_posix()}`. It will be returned to the user in the API response."
 
 
 analytics_agent: Agent[AnalyticsAgentDeps, str] | None = None
@@ -180,15 +284,9 @@ def _analytics_agent_toolset() -> FunctionToolset[AnalyticsAgentDeps]:
 
     @ts.tool
     def run_python_for_analysis(ctx: RunContext[AnalyticsAgentDeps], code: str) -> str:
-        """Restricted Python (`pd`, `np`); use `run_select(sql)` or `_result` for compact output."""
+        """Restricted Python for stats (`pd`, `np`). For charts, use `create_chart` or `plot_and_save_figure`."""
         root = ctx.deps.work_dir
-
-        def run_select(sql: str) -> list[dict]:
-            return aq.run_validated_select(sql=sql, engine=ctx.deps.engine)
-
-        def load_analysis_df(lim: int | None = None) -> pd.DataFrame:
-            return aq.load_analysis_dataframe(engine=ctx.deps.engine, limit=lim)
-
+        helpers = _plot_query_helpers(ctx.deps.engine)
         ns = {
             "__builtins__": _restricted_builtins(root),
             "pd": pd,
@@ -196,31 +294,49 @@ def _analytics_agent_toolset() -> FunctionToolset[AnalyticsAgentDeps]:
             "pathlib": pathlib,
             "json": json_mod,
             "datetime": datetime_mod,
-            "load_analysis_df": load_analysis_df,
-            "run_select": run_select,
             "WORK_ROOT": root,
             "zip": builtins.zip,
+            **helpers,
         }
         return _exec_sandbox(code, ns)
 
     @ts.tool
+    def create_chart(
+        ctx: RunContext[AnalyticsAgentDeps],
+        sql: str,
+        chart_type: ChartType,
+        x_column: str,
+        y_column: str,
+        title: str,
+        filename: str,
+    ) -> str:
+        """
+        Build a chart from a validated SQL aggregate query and save it for the API response.
+        Prefer this for standard bar, line, horizontal bar, and pie charts.
+        SQL should return small aggregated rows with the given x/y column names.
+        """
+        rows = aq.run_validated_select(sql=sql, engine=ctx.deps.engine)
+        df = pd.DataFrame(rows)
+        out_path = _resolve_plot_output(ctx.deps.work_dir, filename)
+        _save_chart_from_dataframe(
+            df,
+            chart_type=chart_type,
+            x_column=x_column,
+            y_column=y_column,
+            title=title,
+            out_path=out_path,
+        )
+        return _persist_plot_artifact(ctx, out_path)
+
+    @ts.tool
     def plot_and_save_figure(ctx: RunContext[AnalyticsAgentDeps], code: str, filename: str) -> str:
-        """Matplotlib plot; call `plt.savefig(OUTPUT_PATH)` or rely on auto-save."""
-        if not FILENAME_SAFE.match(filename):
-            raise ValueError("filename must be ascii-safe with extension png|jpg|jpeg|pdf|svg")
-
-        plots_dir = ctx.deps.work_dir / "plots"
-        plots_dir.mkdir(parents=True, exist_ok=True)
-        out_path = (plots_dir / filename).resolve()
-        if plots_dir.resolve() not in out_path.parents:
-            raise PermissionError("Invalid plot path.")
-
-        def run_select(sql: str) -> list[dict]:
-            return aq.run_validated_select(sql=sql, engine=ctx.deps.engine)
-
-        def load_analysis_df(lim: int | None = None) -> pd.DataFrame:
-            return aq.load_analysis_dataframe(engine=ctx.deps.engine, limit=lim)
-
+        """
+        Advanced matplotlib plotting in a sandbox (`plt`, `pd`, `np`, `OUTPUT_PATH`).
+        Use for custom layouts; otherwise prefer `create_chart`.
+        Saved files are attached to the API response automatically.
+        """
+        out_path = _resolve_plot_output(ctx.deps.work_dir, filename)
+        helpers = _plot_query_helpers(ctx.deps.engine)
         plt.close("all")
         ns = {
             "__builtins__": _restricted_builtins(ctx.deps.work_dir),
@@ -229,9 +345,8 @@ def _analytics_agent_toolset() -> FunctionToolset[AnalyticsAgentDeps]:
             "pd": pd,
             "np": np,
             "OUTPUT_PATH": str(out_path),
-            "load_analysis_df": load_analysis_df,
-            "run_select": run_select,
             "pathlib": pathlib,
+            **helpers,
         }
         err: BaseException | None = None
         try:
@@ -255,9 +370,8 @@ def _analytics_agent_toolset() -> FunctionToolset[AnalyticsAgentDeps]:
         plt.close("all")
 
         if not wrote:
-            return "Figure was not persisted; use plt.savefig(OUTPUT_PATH)."
-        ctx.deps.record_artifact(out_path)
-        return f"Saved plot artifact at `{out_path.relative_to(ctx.deps.work_dir)}`."
+            return "Figure was not persisted; call plt.savefig(OUTPUT_PATH) or draw on the active axes."
+        return _persist_plot_artifact(ctx, out_path)
 
     return ts
 
@@ -358,3 +472,25 @@ def zip_b64_optional(work_dir: pathlib.Path, artifact_relpaths: list[str]) -> st
     if raw is None:
         return None
     return base64.standard_b64encode(raw).decode("ascii")
+
+
+def encode_figure_artifacts(
+    work_dir: pathlib.Path,
+    artifact_relpaths: list[str],
+) -> list[EncodedFigure]:
+    """Inline base64 payloads for each saved plot (primary client delivery path)."""
+    base = work_dir.resolve()
+    encoded: list[EncodedFigure] = []
+    for rel in artifact_relpaths:
+        fp = (base / pathlib.Path(rel)).resolve()
+        if not fp.is_file() or not fp.resolve().is_relative_to(base):
+            continue
+        encoded.append(
+            EncodedFigure(
+                filename=fp.name,
+                relative_path=rel,
+                content_type=content_type_for_artifact(fp),
+                data_base64=base64.standard_b64encode(fp.read_bytes()).decode("ascii"),
+            )
+        )
+    return encoded
