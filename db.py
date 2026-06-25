@@ -187,6 +187,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
             barriers JSON,
             cultural_tags JSON,
             outcome_referral VARCHAR(255),
+            visit_followup JSON,
             literacy_score INT,
             cultural_notes JSON,
             topics_enquired JSON,
@@ -221,6 +222,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
             barriers JSONB,
             cultural_tags JSONB,
             outcome_referral TEXT,
+            visit_followup JSONB,
             literacy_score INT,
             cultural_notes JSONB,
             topics_enquired JSONB,
@@ -252,7 +254,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
 def _ensure_analysis_extra_columns(conn: Any, qualified: str, dialect: str) -> None:
     """Add conversation-level JSON columns introduced after initial table creation."""
     json_type = "JSON" if dialect == "mysql" else "JSONB"
-    for col in ("topics_enquired", "diseases_enquired"):
+    for col in ("topics_enquired", "diseases_enquired", "visit_followup"):
         _safe_ident_fragment(col)
         try:
             conn.execute(
@@ -612,6 +614,7 @@ def _analysis_insert_params(
             "barriers": _serialize_db_value(getattr(segment, "barriers", None) or []),
             "cultural_tags": _serialize_db_value(getattr(segment, "cultural_tags", None)),
             "outcome_referral": _enum_value(getattr(segment, "outcome_referral", None)),
+            "visit_followup": _serialize_db_value(getattr(segment, "visit_followup", None)),
             "literacy_score": getattr(segment, "literacy_score", None),
             "cultural_notes": cultural_notes,
             "topics_enquired": topics_enquired,
@@ -665,7 +668,7 @@ def insert_conversation_analysis(
                 session_id, user_phone, model_name, segment_index,
                 clinical_category, intent, pharmacology_profiles, mental_health_profiles,
                 suspected_condition, symptoms_reported, urgency_level, barriers, cultural_tags,
-                outcome_referral, literacy_score, cultural_notes, topics_enquired, diseases_enquired,
+                outcome_referral, visit_followup, literacy_score, cultural_notes, topics_enquired, diseases_enquired,
                 sdoh_profiles, sdoh_economic_barrier, sdoh_geographic_barrier, sdoh_social_barrier,
                 created_at, analysis_timestamp,
                 conversation_day_of_week, conversation_month, conversation_year
@@ -673,7 +676,7 @@ def insert_conversation_analysis(
                 :session_id, :user_phone, :model_name, :segment_index,
                 :clinical_category, :intent, :pharmacology_profiles, :mental_health_profiles,
                 :suspected_condition, :symptoms_reported, :urgency_level, :barriers, :cultural_tags,
-                :outcome_referral, :literacy_score, :cultural_notes, :topics_enquired, :diseases_enquired,
+                :outcome_referral, :visit_followup, :literacy_score, :cultural_notes, :topics_enquired, :diseases_enquired,
                 :sdoh_profiles,
                 :sdoh_economic_barrier, :sdoh_geographic_barrier, :sdoh_social_barrier,
                 :created_at, :analysis_timestamp,

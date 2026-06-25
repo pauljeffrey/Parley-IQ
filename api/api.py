@@ -16,6 +16,7 @@ from analytics_agent import (
     AnalyticsAgentDeps,
     analytics_agent_run,
     coerce_message_history,
+    encode_figure_artifacts,
     zip_b64_optional,
 )
 from db import get_engine
@@ -36,13 +37,27 @@ class AnalyticsChatPayload(BaseModel):
     )
 
 
+class FigureItem(BaseModel):
+    filename: str = Field(..., description="Basename of the saved plot file.")
+    relative_path: str = Field(..., description="Path within the agent work directory (also used in the zip archive).")
+    content_type: str = Field(..., description="MIME type, e.g. image/png.")
+    data_base64: str = Field(..., description="Base64-encoded file bytes for inline display or download.")
+
+
 class AnalyticsChatResponse(BaseModel):
     output: str
     new_messages: list[Any] = Field(
         default_factory=list,
         description="Messages produced this turn; append to client-side history for continuity.",
     )
-    figures_zip_base64: str | None = None
+    figures: list[FigureItem] = Field(
+        default_factory=list,
+        description="Plot artifacts produced this turn (inline base64 for each saved figure).",
+    )
+    figures_zip_base64: str | None = Field(
+        default=None,
+        description="Optional zip of all figures when more than one chart was saved.",
+    )
     figures_zip_filename: str = "analytics_figures.zip"
 
 
@@ -68,10 +83,20 @@ def analytics_chat(body: AnalyticsChatPayload) -> AnalyticsChatResponse:
             message_history=history or None,
             deps=deps,
         )
-        zip_b64 = zip_b64_optional(deps.work_dir, deps.artifact_relpaths)
+        figures = [
+            FigureItem(
+                filename=item.filename,
+                relative_path=item.relative_path,
+                content_type=item.content_type,
+                data_base64=item.data_base64,
+            )
+            for item in encode_figure_artifacts(deps.work_dir, deps.artifact_relpaths)
+        ]
+        zip_b64 = zip_b64_optional(deps.work_dir, deps.artifact_relpaths) if figures else None
         return AnalyticsChatResponse(
             output=output_text,
             new_messages=new_msgs,
+            figures=figures,
             figures_zip_base64=zip_b64,
         )
     except RuntimeError as exc:

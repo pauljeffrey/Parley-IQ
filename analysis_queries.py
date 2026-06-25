@@ -124,6 +124,11 @@ ANALYSIS_COLUMN_SPECS: tuple[ColumnSpec, ...] = (
         "Use for referral-rate and escalation analytics.",
     ),
     ColumnSpec(
+        "visit_followup",
+        "JSON/TEXT",
+        "VisitFollowup object: recommended, asked_visited, user_visited (booleans or null).",
+    ),
+    ColumnSpec(
         "literacy_score",
         "INT",
         f"User health literacy (`output.AnalysisSegment`): "
@@ -237,7 +242,16 @@ Grain: one row per `output.AnalysisSegment`.
 ## Other tools
 
 - `structured_table_fetch` — simple equality filters on allow-listed columns.
-- `run_python_for_analysis` / `plot_and_save_figure` — small result sets or capped samples only.
+- `run_python_for_analysis` — numeric summaries and transforms on small result sets.
+- `create_chart` — **preferred for visuals**: pass aggregated SQL plus chart type (`bar`, `horizontal_bar`, `line`, `pie`), column names, title, and a safe filename (`.png` recommended). Saved plots are returned to the user automatically.
+- `plot_and_save_figure` — custom matplotlib when `create_chart` is not enough; use `OUTPUT_PATH`, `run_select`, or `load_analysis_df`.
+
+## Visualizations
+
+- When the user asks for a chart, graph, plot, trend, or distribution, **always** produce one with `create_chart` (or `plot_and_save_figure` for custom layouts).
+- First fetch or aggregate the data with SQL, then chart a small result (typically ≤ 30 rows).
+- Tell the user which chart you saved and summarize the insight in plain language.
+- Default to `.png` filenames like `urgency_mix.png`.
 
 ## PHI
 
@@ -290,6 +304,7 @@ Integer {LITERACY_SCORE_MIN}–{LITERACY_SCORE_MAX} per segment.
 - `mental_health_profiles`: list of `MentalHealthCrisis`
 - `symptoms_reported`: list of `SymptomNature` (`StandardSymptom`, `SymptomCategory`, …)
 - `cultural_tags`: `CulturalTag` with `Tag` enum values
+- `visit_followup`: `VisitFollowup` — `recommended`, `asked_visited`, `user_visited` (null when unknown)
 - `sdoh_profiles`: list of `SDoHProfile` (conversation-level; repeated on each segment row)
 """
 

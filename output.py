@@ -360,6 +360,24 @@ OutcomeReferral = Literal[
     "Escalated to Human",
 ]
 
+
+class VisitFollowup(BaseModel):
+    """Whether the AI recommended care and whether the user followed through."""
+    model_config = ConfigDict(extra="forbid")
+    recommended: Optional[bool] = Field(
+        None,
+        description="AI recommended hospital visit or in-house appointment booking.",
+    )
+    asked_visited: Optional[bool] = Field(
+        None,
+        description="AI asked whether the user visited after that recommendation.",
+    )
+    user_visited: Optional[bool] = Field(
+        None,
+        description="User visited a clinic or hospital after the recommendation.",
+    )
+
+
 class AnalysisSegment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -377,6 +395,7 @@ class AnalysisSegment(BaseModel):
     barriers: List[SDoHBarrier] = Field(default_factory=list)
     cultural_tags: Optional[CulturalTag] = None
     outcome_referral: OutcomeReferral
+    visit_followup: Optional[VisitFollowup] = None
     literacy_score: int = Field(
         ge=1,
         le=5,
