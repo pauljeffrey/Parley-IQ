@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AISHA Syndromic Surveillance — Advanced Public Health Intelligence Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --teal: #0d7a6f;
+    --teal-d: #0a5c54;
+    --teal-l: #e6f2f0;
+    --ink: #12313a;
+    --slate: #5b7178;
+    --line: #e2e8ea;
+    --bg: #f4f7f6;
+    --paper: #ffffff;
+    --amber: #e0952b;
+    --amber-bg: #fdf4e5;
+    --red: #c0392b;
+    --red-bg: #fbeceb;
+    --green: #2e7d32;
+    --green-bg: #e8f5e9;
+    --purple: #6a1b9a;
+    --purple-bg: #f3e5f5;
+    --blue: #1565c0;
+    --blue-bg: #e3f2fd;
+    --thin: #9db2b8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { 
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+    background: var(--bg); 
+    color: var(--ink); 
+    line-height: 1.4; 
+    font-size: 13px; 
+  }
+  .app { max-width: 1600px; margin: 0 auto; padding: 0 24px 60px; }
+
+  /* Header Layout */
+  header { 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    padding: 20px 0 16px; 
+    border-bottom: 1px solid var(--line); 
+    margin-bottom: 24px; 
+    flex-wrap: wrap; 
+    gap: 16px; 
+  }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .mark { 
+    width: 38px; 
+    height: 38px; 
+    border-radius: 10px; 
+    background: var(--teal); 
+    position: relative; 
+    flex-shrink: 0; 
+  }
+  .mark::before, .mark::after { 
+    content: ""; 
+    position: absolute; 
+    background: #fff; 
+    border-radius: 50% 50% 50% 2px; 
+  }
+  .mark::before { width: 12px; height: 12px; top: 8px; left: 8px; }
+  .mark::after { width: 12px; height: 12px; bottom: 8px; right: 8px; background: #4fd1c0; }
+  
+  .logo h1 { font-size: 18px; font-weight: 700; letter-spacing: .2px; color: var(--ink); }
+  .logo span { display: block; font-size: 11px; font-weight: 500; color: var(--slate); text-transform: uppercase; letter-spacing: 0.5px; }
+  
+  .hdr-right { display: flex; align-items: center; gap: 16px; font-size: 12px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--teal); }
+  .dot { 
+    width: 8px; 
+    height: 8px; 
+    border-radius: 50%; 
+    background: var(--green); 
+    box-shadow: 0 0 0 0 rgba(46,125,50,.5); 
+    animation: pulse 2s infinite; 
+  }
+  @keyframes pulse { 
+    0% { box-shadow: 0 0 0 0 rgba(46,125,50,.5); } 
+    70% { box-shadow: 0 0 0 8px rgba(46,125,50,0); } 
+    100% { box-shadow: 0 0 0 0 rgba(46,125,50,0); } 
+  }
+  .role-badge { background: var(--ink); color: #fff; padding: 5px 12px; border-radius: 6px; font-weight: 600; font-size: 11px; letter-spacing: 0.3px; }
+
+  /* Filter Controls */
+  .controls { 
+    display: flex; 
+    gap: 12px; 
+    flex-wrap: wrap; 
+    margin-bottom: 20px; 
+    align-items: center; 
+    background: var(--paper); 
+    padding: 12px 16px; 
+    border-radius: 10px; 
+    border: 1px solid var(--line); 
+  }
+  .control-group { display: flex; align-items: center; gap: 8px; }
+  .control-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--slate); }
+  select, .pill { 
+    font-family: inherit; 
+    font-size: 13px; 
+    border: 1px solid var(--line); 
+    background: var(--paper); 
+    color: var(--ink); 
+    border-radius: 6px; 
+    padding: 7px 12px; 
+    cursor: pointer; 
+    transition: all 0.15s ease;
+  }
+  select:focus, .pill:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+  .pill:hover { background: var(--bg); }
+  .pill.active { background: var(--teal); color: #fff; border-color: var(--teal); }
+  .spacer { flex: 1; }
+  .method-note { font-size: 11px; color: var(--slate); font-style: italic; text-align: right; }
+
+  /* 4-Column Metric Strip */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+  .kpi { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; position: relative; overflow: hidden; }
+  .kpi .num { font-size: 28px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+  .kpi .lbl { font-size: 11px; color: var(--slate); margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+  .kpi .trend { font-size: 11px; margin-top: 8px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+  .up { color: var(--red); } .flat { color: var(--slate); } .down { color: var(--green); }
+
+  /* Master Core Grid Layout (3 Columns for comprehensive view) */
+  .dashboard-grid { 
+    display: grid; 
+    grid-template-columns: 32% 34% 34%; 
+    gap: 16px; 
+  }
+  
+  /* Shared Card Architecture */
+  .card { 
+    background: var(--paper); 
+    border: 1px solid var(--line); 
+    border-radius: 12px; 
+    padding: 18px; 
+    margin-bottom: 16px; 
+    box-shadow: 0 1px 3px rgba(18,49,58,0.02); 
+  }
+  .card h2 { 
+    font-size: 12px; 
+    font-weight: 700; 
+    text-transform: uppercase; 
+    letter-spacing: .8px; 
+    color: var(--ink); 
+    margin-bottom: 2px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+  }
+  .card h2 .badge-count { font-size: 10px; background: var(--line); color: var(--ink); padding: 2px 6px; border-radius: 4px; }
+  .card .sub { font-size: 11px; color: var(--slate); margin-bottom: 14px; line-height: 1.3; }
+
+  /* Alert List Configuration */
+  .alert-container { max-height: 380px; overflow-y: auto; padding-right: 4px; }
+  .alert { 
+    border: 1px solid var(--line); 
+    border-left-width: 4px; 
+    border-radius: 8px; 
+    padding: 12px; 
+    margin-bottom: 10px; 
+    cursor: pointer; 
+    transition: all .15s ease-in-out; 
+    background: #fff;
+  }
+  .alert:hover { transform: translateY(-1px); box-shadow: 0 3px 6px rgba(0,0,0,0.04); background: #fbfdfd; }
+  .alert.red { border-left-color: var(--red); }
+  .alert.amber { border-left-color: var(--amber); }
+  .alert.active-selection { background: var(--teal-l); border-color: var(--teal); }
+  
+  .alert-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .alert-title { font-weight: 700; font-size: 13px; color: var(--ink); }
+  .alert-loc { font-size: 11px; color: var(--slate); margin-top: 2px; font-weight: 500; }
+  
+  .sev { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 2px 6px; border-radius: 4px; white-space:nowrap; }
+  .sev.red { background: var(--red-bg); color: var(--red); }
+  .sev.amber { background: var(--amber-bg); color: var(--amber); }
+  
+  .alert-stats { display: flex; gap: 12px; margin-top: 10px; font-size: 11px; color: var(--slate); flex-wrap: wrap; border-top: 1px dashed var(--line); padding-top: 8px; }
+  .alert-stats b { color: var(--ink); }
+  .idsr-tag { font-size: 10px; background: var(--bg); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; color: var(--teal-d); font-weight: 600; }
+
+  /* Data Quality Multi-Progress Indicators */
+  .dq-grid { display: grid; gap: 10px; }
+  .dq-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }
+  .dq-row:last-child { border-bottom: none; }
+  .dq-label { color: var(--slate); display: flex; flex-direction: column; }
+  .dq-label span.desc { font-size: 10px; color: var(--thin); font-style: italic; }
+  .dq-val { font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; width: 100px; }
+  .bar i { display: block; height: 100%; border-radius: 3px; }
+  .conf-good { background: var(--green); } 
+  .conf-mid { background: var(--amber); } 
+  .conf-low { background: var(--red); }
+  .warn-box { background: var(--amber-bg); border: 1px solid #f0d9a8; border-radius: 8px; padding: 10px 12px; font-size: 11px; color: #7d510d; margin-top: 12px; line-height: 1.4; }
+  .warn-box b { color: var(--ink); }
+
+  /* Structured Profiles and Tabular Frameworks */
+  .table-wrapper { overflow-x: auto; max-height: 480px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+  th { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--slate); padding: 10px 8px; border-bottom: 2px solid var(--line); background: var(--paper); position: sticky; top: 0; z-index: 10; }
+  td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:hover td { background: #fbfdfd; }
+  
+  .chip { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 700; text-transform: uppercase; }
+  .chip.imm { background: var(--red-bg); color: var(--red); }
+  .chip.wk { background: var(--teal-l); color: var(--teal-d); }
+  .chip.mo { background: var(--blue-bg); color: var(--blue); }
+  
+  .status-ok { color: var(--green); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+  .status-watch { color: var(--amber); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+  .status-alert { color: var(--red); font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }
+
+  /* Structured Data Aggregators */
+  .profile-group { display: flex; flex-direction: column; gap: 10px; }
+  .profile-item { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .profile-item-title { font-weight: 700; font-size: 12px; color: var(--ink); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+  .profile-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .p-badge { font-size: 10px; background: var(--paper); border: 1px solid var(--line); padding: 3px 8px; border-radius: 4px; font-weight: 500; color: var(--ink); display: flex; align-items: center; gap: 4px; }
+  .p-badge.danger { border-color: var(--red); color: var(--red); background: var(--red-bg); font-weight: 600; }
+  .p-badge.warning { border-color: var(--amber); color: var(--amber); background: var(--amber-bg); font-weight: 600; }
+  .p-badge.info { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+
+  /* Simple Funnel / Horizontal Distribution Components */
+  .dist-bar { display: flex; height: 18px; border-radius: 4px; overflow: hidden; margin: 8px 0 14px; }
+  .dist-seg { height: 100%; transition: all 0.3s; position: relative; cursor: pointer; }
+  .dist-legend { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; font-size: 11px; }
+  .dist-legend-item { display: flex; align-items: center; gap: 6px; color: var(--slate); }
+  .dist-color { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+  /* Legend Indicators */
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--slate); margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  /* System Audit Banner Grid */
+  .sentinel-box { border-left: 4px solid var(--red); background: var(--red-bg); color: #721c24; border-radius: 6px; padding: 10px 12px; font-size: 11px; margin-top: 10px; display: flex; align-items: flex-start; gap: 8px; }
+  .sentinel-icon { font-size: 14px; font-weight: 700; line-height: 1; }
+
+  footer { margin-top: 32px; font-size: 11px; color: var(--thin); text-align: center; line-height: 1.6; }
+  .disclaimer { background: var(--paper); border: 1px dashed var(--line); border-radius: 8px; padding: 12px 16px; font-size: 11px; color: var(--slate); margin-top: 20px; line-height: 1.6; }
+  
+  @media(max-width: 1200px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .kpis { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  
+  <!-- Top Level Brand & Identity Context -->
+  <header>
+    <div class="logo">
+      <div class="mark"></div>
+      <div>
+        <h1>AISHA Public Health Surveillance Matrix</h1>
+        <span>National Syndromic Early-Warning Layer · Integrated Disease Surveillance and Response (IDSR) Alignment</span>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <span class="live"><span class="dot"></span>Live Pipeline · Real-Time Conversation Stream Analysis</span>
+      <span class="role-badge">Role Workspace: NCDC National Epidemiologist / Core Director</span>
+    </div>
+  </header>
+
+  <!-- Global Dashboard Control Infrastructure -->
+  <div class="controls">
+    <div class="control-group">
+      <label for="geo">Geographic Axis</label>
+      <select id="geo">
+        <option value="National">National View (All States)</option>
+        <option value="Borno">Borno State (Maiduguri Cluster Focus)</option>
+        <option value="Kano">Kano State (Metropolitan Clusters)</option>
+        <option value="Kaduna">Kaduna State (Zaria Axis)</option>
+        <option value="Lagos">Lagos State (High Density Distribution)</option>
+        <option value="Ekiti">Ekiti State (Low Volume Baseline)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label for="period">Temporal Windows</label>
+      <select id="period">
+        <option>Last 8 Epidemiological Weeks</option>
+        <option>Last 12 Epidemiological Weeks</option>
+        <option>Last 6 Calendar Months</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Syndromic Notification Tier</label>
+      <span class="pill active" data-tier="all">All Reporting Tiers</span>
+      <span class="pill" data-tier="Immediate">Immediate Notification Only</span>
+      <span class="pill" data-tier="Weekly">Weekly Reporting Segment</span>
+    </div>
+    <div class="spacer"></div>
+    <span class="method-note">Statistical Baseline Engine: Moving Epidemic Method (MEM) · Locally Calibrated Multi-Source Seasonality &amp; Population Weight Adjustments</span>
+  </div>
+
+  <!-- Key Public Health Performance Indicators (KPI) -->
+  <div class="kpis">
+    <div class="kpi">
+      <div class="num" id="kpi-interactions">4,812</div>
+      <div class="lbl">Analyzed Conversational Strands / Wk</div>
+      <div class="trend up">▲ 11% Above Historical Threshold</div>
+    </div>
+    <div class="kpi">
+      <div class="num" id="kpi-anomalies">3</div>
+      <div class="lbl">Active Statistical Outbreaks (MEM)</div>
+      <div class="trend up">▲ 2 Critical Clusters Confirmed</div>
+    </div>
+    <div class="kpi">
+      <div class="num" id="kpi-amr">24.2%</div>
+      <div class="lbl">Detected AMR Misuse Signaling Rate</div>
+      <div class="trend up" style="color:var(--red);">▲ High Self-Medication Risk Profile</div>
+    </div>
+    <div class="kpi">
+      <div class="num" id="kpi-safety">98.4%</div>
+      <div class="lbl">LLM Clinical Intent Safety Index</div>
+      <div class="trend down" style="color:var(--amber);">▼ 1.2% Omission Flag Incidents Triggered</div>
+    </div>
+  </div>
+
+  <!-- Main Multi-Dimensional Data Matrix Grid -->
+  <div class="dashboard-grid">
+    
+    <!-- LEFT COLUMN: ANOMALY MONITORING, CLUSTERING & ALERT ENGINE -->
+    <div class="column-container">
+      
+      <!-- Card: Active Epizootic / Syndromic Anomalies -->
+      <div class="card">
+        <h2>Active Disease Outbreaks &amp; Signals <span class="badge-count" id="active-alert-count">3</span></h2>
+        <div class="sub">Statistically significant variations against regional baselines. Select a cluster profile to inspect line charting trends.</div>
+        
+        <div class="alert-container">
+          <div class="alert red active-selection" id="alert-cholera" onclick="switchSurveillanceTarget('cholera')">
+            <div class="alert-top">
+              <div>
+                <div class="alert-title">Acute Watery Diarrhea — Cluster Spike</div>
+                <div class="alert-loc">Borno State · Maiduguri LGA Node</div>
+              </div>
+              <span class="sev red">Immediate</span>
+            </div>
+            <div class="alert-stats">
+              <span>Observed: <b>214</b> / Expected: <b>96</b></span>
+              <span>z-score: <b>+4.1</b></span>
+              <span class="idsr-tag">ICD-11: Cholera Suspect</span>
+              <span class="status-alert">⚠ Awaiting Verifying Clinician Sign-Off</span>
+            </div>
+          </div>
+
+          <div class="alert red" id="alert-measles" onclick="switchSurveillanceTarget('measles')">
+            <div class="alert-top">
+              <div>
+                <div class="alert-title">Maculopapular Fever &amp; Rash Cluster</div>
+                <div class="alert-loc">Kano State · Multiple LGA Nodes</div>
+              </div>
+              <span class="sev red">Immediate</span>
+            </div>
+            <div class="alert-stats">
+              <span>Observed: <b>138</b> / Expected: <b>71</b></span>
+              <span>z-score: <b>+3.2</b></span>
+              <span class="idsr-tag">ICD-11: Measles / Mpox Suspect</span>
+              <span class="status-ok">✓ Verified · Exported to SORMAS API</span>
+            </div>
+          </div>
+
+          <div class="alert amber" id="alert-csm" onclick="switchSurveillanceTarget('csm')">
+            <div class="alert-top">
+              <div>
+                <div class="alert-title">Pyrexia + Meningismus/Neck Stiffness</div>
+                <div class="alert-loc">Kaduna State · Zaria LGA Node</div>
+              </div>
+              <span class="sev amber">Watch</span>
+            </div>
+            <div class="alert-stats">
+              <span>Observed: <b>29</b> / Expected: <b>17</b></span>
+              <span>z-score: <b>+1.9</b></span>
+              <span class="idsr-tag">ICD-11: Meningitis (CSM)</span>
+              <span class="status-watch">⚑ Under Threshold Limit Monitoring</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: Time Series Forecasting Engine -->
+      <div class="card">
+        <h2 id="chartTitle">Signal Evolution Engine</h2>
+        <div class="sub" id="chartSub">Acute Watery Diarrhea · Borno State · Epidemic Threshold Comparison Timeline</div>
+        <div style="position: relative; height:180px; width:100%;">
+          <canvas id="surveillanceChart"></canvas>
+        </div>
+        <div class="legend">
+          <span><i class="sw" style="background:#0d7a6f"></i>Observed Vol</span>
+          <span><i class="sw" style="background:#9db2b8"></i>MEM Baseline</span>
+          <span><i class="sw" style="background:#c0392b"></i>Epidemic Limit</span>
+        </div>
+      </div>
+
+      <!-- Card: Clinical Taxonomy Breakdown Matrix -->
+      <div class="card">
+        <h2>Clinical Domain Taxonomy Distribution</h2>
+        <div class="sub">Aggregated system categorization based on user clinical inquiries.</div>
+        <div class="dist-bar">
+          <div class="dist-seg" style="width: 45%; background: var(--teal);" title="Communicable: 45%"></div>
+          <div class="dist-seg" style="width: 20%; background: var(--blue);" title="Non-Communicable: 20%"></div>
+          <div class="dist-seg" style="width: 15%; background: var(--purple);" title="Maternal & Child Health: 15%"></div>
+          <div class="dist-seg" style="width: 12%; background: var(--amber);" title="Nutrition & Lifestyle: 12%"></div>
+          <div class="dist-seg" style="width: 8%; background: var(--slate);" title="Other System Channels: 8%"></div>
+        </div>
+        <div class="dist-legend">
+          <div class="dist-legend-item"><i class="dist-color" style="background: var(--teal);"></i> Communicable (45%)</div>
+          <div class="dist-legend-item"><i class="dist-color" style="background: var(--blue);"></i> Chronic NCDs (20%)</div>
+          <div class="dist-legend-item"><i class="dist-color" style="background: var(--purple);"></i> Maternal/Child (15%)</div>
+          <div class="dist-legend-item"><i class="dist-color" style="background: var(--amber);"></i> Nutrition/Life (12%)</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- CENTER COLUMN: PHARMACOVIGILANCE, STEWARDSHIP & SOCIOECONOMIC RISK PROFILES -->
+    <div class="column-container">
+      
+      <!-- Card: SDoH Vulnerability Matrix -->
+      <div class="card">
+        <h2>Social Determinants of Health (SDoH) Risk Profiles</h2>
+        <div class="sub">Extracted socio-environmental vulnerabilities directly impacting local healthcare clinical navigation patterns.</div>
+        
+        <div class="profile-group">
+          <div class="profile-item">
+            <div class="profile-item-title">
+              <span>Environmental &amp; Infrastructure Indicators</span>
+              <span class="chip imm">Structural Risks</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge danger">⚠ Water &amp; Sanitation (WASH) Risks Active</span>
+              <span class="p-badge warning">Overcrowded Housing Realities Found</span>
+              <span class="p-badge info">Residency: Majorly Peri-Urban/Rural Nodes</span>
+            </div>
+          </div>
+
+          <div class="profile-item">
+            <div class="profile-item-title">
+              <span>Socioeconomic Access Barriers Flagged</span>
+              <span class="chip wk">Structural Barriers</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge danger">Financial Constraint: Medication Costs</span>
+              <span class="p-badge danger">Financial Constraint: Consultation Fees</span>
+              <span class="p-badge warning">Transportation Distance Roadblocks</span>
+              <span class="p-badge info">Bracket: Dominant Indigent/Low Income</span>
+            </div>
+          </div>
+
+          <div class="profile-item">
+            <div class="profile-item-title">
+              <span>Linguistic &amp; Cognitive Health Literacy Metrics</span>
+              <span class="chip mo">Literacy Profiles</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge warning">Low Health Literacy Predominance</span>
+              <span class="p-badge danger">High Medical Jargon Confusions Registered</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: Pharmacovigilance & Antimicrobial Stewardship Sentinel -->
+      <div class="card">
+        <h2>Antimicrobial Stewardship &amp; Pharmacovigilance Panel</h2>
+        <div class="sub">Real-time surveillance tracking prescription compliance parameters, toxic drug-herb cross-interactions, and AMR vectors.</div>
+        
+        <div class="profile-group">
+          <div class="profile-item" style="border-left: 4px solid var(--red);">
+            <div class="profile-item-title" style="color: var(--red);">
+              <span>Antimicrobial Resistance (AMR) Tracking Flags</span>
+              <span class="chip imm">AMR ALERT</span>
+            </div>
+            <p style="font-size:11px; margin-bottom:8px; color: var(--slate);">Detected heavy signals of incomplete therapeutic cycles or empirical usage outside diagnostics.</p>
+            <div class="profile-badges">
+              <span class="p-badge danger">Uncompleted Antibiotic Courses (62%)</span>
+              <span class="p-badge danger">Empirical Self-Medication Habits Rising</span>
+            </div>
+          </div>
+
+          <div class="profile-item">
+            <div class="profile-item-title">
+              <span>Pharmaceutical Treatment Compliance Breakdown</span>
+              <span class="chip wk">Therapy Audit</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge warning">Frequent Missed Doses: Cost-Driven</span>
+              <span class="p-badge warning">Early Termination: Feeling Better Pre-maturely</span>
+              <span class="p-badge info">Reported Adverse Side Effects Tracked</span>
+            </div>
+          </div>
+
+          <div class="profile-item" style="border-left: 4px solid var(--amber);">
+            <div class="profile-item-title">
+              <span>Integrative Herb-Drug Interaction Matrix</span>
+              <span class="chip mo">Cross-Risk Evaluation</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge danger">⚠ Active Herb-Drug Interaction Co-occurrence (31%)</span>
+              <span class="p-badge warning">Concomitant Herb Usage: Agbo / Moringa</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN: SOCIOCULTURAL TAXONOMY, CLINICAL OUTCOMES & AI GUARDRAILS -->
+    <div class="column-container">
+      
+      <!-- Card: Sociocultural Context, Nuance & Belief Orientations -->
+      <div class="card">
+        <h2>Sociocultural Context &amp; Traditional Belief Frameworks</h2>
+        <div class="sub">Identified ethnographical behavioral metrics mapping community cognitive framework models.</div>
+        
+        <div class="profile-group">
+          <div class="profile-item">
+            <div class="profile-item-title">
+              <span>Dominant Health Interpretation Orientations</span>
+              <span class="chip wk">Etiology Profiles</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge warning">Integrative (Clinical + Herb Traditions)</span>
+              <span class="p-badge info">Faith-Based / Spiritual Causation Drivers</span>
+              <span class="p-badge danger">Supernatural Illness Attribution Signaling</span>
+            </div>
+          </div>
+
+          <div class="profile-item">
+            <div class="profile-item-title">
+              <span>Linguistic Nuance Models &amp; Idiomatic Terms</span>
+              <span class="chip mo">Linguistic Mapping</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge info">Heavy Code-Switching (Nigerian Pidgin Mix)</span>
+              <span class="p-badge info">Local Slang Idioms: Jedijedi / Typhoid-Malaria</span>
+              <span class="p-badge warning">Social Stigma Privacy Concerns Registered</span>
+            </div>
+          </div>
+
+          <div class="profile-item">
+            <div class="profile-item-title">
+              <span>Decision Authority Networks</span>
+              <span class="chip wk">Authority Matrix</span>
+            </div>
+            <div class="profile-badges">
+              <span class="p-badge info">Spousal Conciliation Architecture</span>
+              <span class="p-badge warning">Family Elder Approval Threshold Dependencies</span>
+              <span class="p-badge info">Communal Peer Feedback Reliance</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: Real-World Clinical Outcomes & AI Safety Sentinel -->
+      <div class="card">
+        <h2>AI Operational Guardrails &amp; Referral Validation Engine</h2>
+        <div class="sub">Continuous automated quality oversight checking safety compliance and closed-loop clinic navigation outcomes.</div>
+        
+        <div class="dq-grid" style="margin-bottom:12px;">
+          <div class="dq-row">
+            <div class="dq-label">Medical Factual Consistency Score<span class="desc">Clinical accuracy across intents</span></div>
+            <div class="dq-val">0.96 <div class="bar"><i class="conf-good" style="width:96%"></i></div></div>
+          </div>
+          <div class="dq-row">
+            <div class="dq-label">Health Literacy &amp; Jargon Avoidance<span class="desc">Translation clarity matching low literacy</span></div>
+            <div class="dq-val">0.91 <div class="bar"><i class="conf-good" style="width:91%"></i></div></div>
+          </div>
+          <div class="dq-row">
+            <div class="dq-label">Closed-Loop Facility Action Rates<span class="desc">Referrals recommended vs verified clinic visits</span></div>
+            <div class="dq-val">42% <div class="bar"><i class="conf-mid" style="width:42%"></i></div></div>
+          </div>
+        </div>
+
+        <div class="sentinel-box">
+          <div class="sentinel-icon">⚠</div>
+          <div>
+            <strong>AI Response Red-Flag Omission Incident Report:</strong><br>
+            In the previous 48 hours, the AI classification layer omitted critical emergency validation queries across <strong>14 interactions</strong> featuring high-risk pediatric respiratory distress indicators. Triggering emergency model calibration protocol updates.
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: AI Core Pipeline Execution Data Metrics -->
+      <div class="card">
+        <h2>Natural Language Pipeline Performance Metrics</h2>
+        <div class="sub">System operational capacities and incoming stream parameters.</div>
+        <div class="dq-grid">
+          <div class="dq-row"><span class="dq-label">System Active Cohorts (Rolling 7-Day)</span><span class="dq-val">41,290 Profiles</span></div>
+          <div class="dq-row">
+            <span class="dq-label">Voice Signal Transcription Cleanliness</span>
+            <span class="dq-val">0.71 <div class="bar"><i class="conf-mid" style="width:71%"></i></div></span>
+          </div>
+          <div class="dq-row"><span class="dq-label">Linguistic Stream Allocation Mix</span><span class="dq-val" style="font-size:11px; text-align:right;">Hausa (34%) · EN (28%) · Pidgin (21%) · Yoruba (10%) · Igbo (7%)</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- EXPANDED BOTTOM GRID ROW: COMPREHENSIVE WATCHLIST CONTROLS -->
+  <div class="dashboard-grid" style="grid-template-columns: 100%; margin-top: 16px;">
+    
+    <!-- Card: Full Integrated Syndromic Watchlist Table -->
+    <div class="card">
+      <h2>Integrated National Syndromic Surveillance Watchlist</h2>
+      <div class="sub">Tracking all 18 IDSR-mapped clinical conditions alongside newly identified structural mental health and multi-intent conversation categories. Filter configurations apply automatically via selection pills above.</div>
+      
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Surveillance Target Syndrome / Intent Mapping</th>
+              <th>Reporting Classification Tier</th>
+              <th>Current Wk Vol</th>
+              <th>MEM Deviation Variance</th>
+              <th>Clinical Escalation State</th>
+              <th>Primary Associated SDoH Barrier Element</th>
+              <th>Mental Health Risk Core Matrix</th>
+            </tr>
+          </thead>
+          <tbody id="comprehensiveWatchlistTable">
+            <!-- Programmatically injected rows live here -->
+          </tbody>
+        </table>
+      </div>
+      
+      <div class="warn-box" style="background:var(--teal-l); border-color:#bfe0db; color:var(--teal-d); margin-top:14px;">
+        <strong>Epidemiological Data Notice:</strong> Reporting fields containing cells representing volumes less than 5 records are statistically suppressed automatically inside production environments to preserve strict patient confidentiality guidelines and eliminate false statistical outliers.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Public System Disclaimer & Standard Regulatory Protocols -->
+  <div class="disclaimer">
+    <strong>Public Health Information Architecture Disclaimer Notice:</strong> This interactive workspace acts exclusively as an anonymized syndromic early-warning analytics protocol engine. All numerical structures displayed serve as illustrative data models mapping onto conversation pipeline evaluations. All anomaly signals require physical clinician validation before routing into SORMAS systems or official NCDC administrative alerts. Built to conform with NDPA security parameters, WHO guidelines for AI-driven health architectures, and the UKHSA Moving Epidemic Method frameworks.
+  </div>
+
+  <footer>
+    AISHA Technologies Network · Core Community Early-Warning Engineering Systems Layer · Structured to Complement NCDC SORMAS / IDSR Networks<br>
+    Methodology Engine: UK Health Security Agency Moving Epidemic Method (MEM) · Automated Conversation Parsing Protocols via Pydantic Extraction Pipelines
+  </footer>
+</div>
+
+<script>
+// ---- TIME SERIES GRAPH ENGINE CONFIGURATIONS (CHART.JS) ----
+const timelineLabels = ['Epidemiological W1','Epidemiological W2','Epidemiological W3','Epidemiological W4','Epidemiological W5','Epidemiological W6','Epidemiological W7','Epidemiological W8'];
+const timeSeriesDatasetMatrix = {
+  cholera: {
+    title: 'Signal Evolution: Acute Watery Diarrhea Cluster',
+    sub: 'Observed Vol vs MEM Baseline & Epidemic Thresholds · Borno State · IDSR: Cholera Suspect Layer',
+    observed: [62, 71, 68, 80, 95, 120, 168, 214],
+    baseline: [70, 74, 72, 78, 84, 88, 92, 96],
+    threshold: [110, 112, 114, 118, 124, 130, 136, 142]
+  },
+  measles: {
+    title: 'Signal Evolution: Maculopapular Fever & Rash Node',
+    sub: 'Observed Vol vs MEM Baseline & Epidemic Thresholds · Kano State · IDSR: Measles-Mpox Target Layer',
+    observed: [48, 55, 60, 72, 88, 101, 120, 138],
+    baseline: [52, 54, 58, 60, 63, 66, 69, 71],
+    threshold: [88, 90, 94, 98, 104, 110, 116, 122]
+  },
+  csm: {
+    title: 'Signal Evolution: Pyrexia + Neck Stiffness (Watch Node)',
+    sub: 'Observed Vol vs MEM Baseline & Epidemic Thresholds · Kaduna State · IDSR: Meningitis CSM Target Layer',
+    observed: [12, 14, 13, 15, 16, 19, 24, 29],
+    baseline: [13, 13, 14, 14, 15, 15, 16, 17],
+    threshold: [26, 27, 28, 29, 30, 31, 32, 33]
+  }
+};
+
+let metricsChartInstance;
+
+function renderSurveillanceChart(targetKey) {
+  const dataset = timeSeriesDatasetMatrix[targetKey];
+  document.getElementById('chartTitle').textContent = dataset.title;
+  document.getElementById('chartSub').textContent = dataset.sub;
+  
+  const ctx = document.getElementById('surveillanceChart').getContext('2d');
+  
+  const configuration = {
+    type: 'line',
+    data: {
+      labels: timelineLabels,
+      datasets: [
+        {
+          label: 'Observed Volume',
+          data: dataset.observed,
+          borderColor: '#0d7a6f',
+          backgroundColor: 'rgba(13, 122, 111, 0.06)',
+          fill: true,
+          tension: 0.25,
+          borderWidth: 2.5,
+          pointRadius: 3
+        },
+        {
+          label: 'MEM Expected Baseline',
+          data: dataset.baseline,
+          borderColor: '#9db2b8',
+          borderDash: [6, 4],
+          fill: false,
+          tension: 0.25,
+          borderWidth: 2,
+          pointRadius: 0
+        },
+        {
+          label: 'Epidemic Threshold Limit',
+          data: dataset.threshold,
+          borderColor: '#c0392b',
+          borderDash: [3, 3],
+          fill: false,
+          tension: 0.25,
+          borderWidth: 1.5,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, grid: { color: '#eef3f3' }, ticks: { font: { size: 10 }, color: '#5b7178' } },
+        x: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#5b7178' } }
+      }
+    }
+  };
+
+  if (metricsChartInstance) {
+    metricsChartInstance.destroy();
+  }
+  metricsChartInstance = new Chart(ctx, configuration);
+}
+
+// Interactive alert selection routing
+function switchSurveillanceTarget(targetKey) {
+  document.querySelectorAll('.alert').forEach(element => element.classList.remove('active-selection'));
+  const targetAlertCard = document.getElementById(`alert-${targetKey}`);
+  if (targetAlertCard) {
+    targetAlertCard.classList.add('active-selection');
+  }
+  renderSurveillanceChart(targetKey);
+}
+
+// ---- SURVEILLANCE REPORT DATA REPOSITORY MATRIX ----
+const syndromicMasterDataset = [
+  ['Acute Watery Diarrhea', 'Immediate', 214, '+123% Excessive Deviation', 'alert', 'WASH Clear Infrastructure Failure', 'Negative Indicators Risk'],
+  ['Maculopapular Fever & Rash', 'Immediate', 138, '+94% High Growth Cluster', 'alert', 'Low Health Literacy Obstacles', 'Negative Indicators Risk'],
+  ['Pyrexia + Meningismus / Neck Stiffness', 'Immediate', 29, '+71% Mild Threshold Deviation', 'watch', 'Transportation Access Barriers', 'Negative Indicators Risk'],
+  ['Undifferentiated Acute Pyrexia / Fever', 'Immediate', 1840, '+6% Standard System Baseline', 'ok', 'Medication Affordability Caps', 'Negative Indicators Risk'],
+  ['Pyrexia + Severe Hemorrhagic Manifestations', 'Immediate', 7, '+0% Flat Static Baseline', 'ok', 'Social Stigma Reticence Concerns', 'Active Crisis Identifiers Found'],
+  ['Sore Throat + Pharyngeal Membrane Sign', 'Immediate', 11, '+38% Watch Threshold Growth', 'watch', 'Low Health Literacy Obstacles', 'Negative Indicators Risk'],
+  ['Acute Flaccid Paralysis (AFP)', 'Immediate', 3, 'Expected Equilibrium Range', 'ok', 'Transportation Access Barriers', 'Negative Indicators Risk'],
+  ['Severe Acute Respiratory Syndrome Channels', 'Immediate', 52, '+9% Standard System Baseline', 'ok', 'Medication Affordability Caps', 'Negative Indicators Risk'],
+  ['Acute Jaundice Syndrome Node', 'Immediate', 14, '+4% Standard System Baseline', 'ok', 'WASH Clear Infrastructure Failure', 'Negative Indicators Risk'],
+  ['Vesicular Skin Lesion Outcroppings', 'Immediate', 22, '+18% Monitor Watch Trajectory', 'watch', 'Social Stigma Reticence Concerns', 'Negative Indicators Risk'],
+  ['Bloody Diarrhea Reporting Channel', 'Weekly', 31, '+5% Standard System Baseline', 'ok', 'WASH Clear Infrastructure Failure', 'Negative Indicators Risk'],
+  ['Influenza-Like Illness (ILI) Respiratory Channel', 'Weekly', 420, '-3% System Reduction Variance', 'ok', 'Medication Affordability Caps', 'Negative Indicators Risk'],
+  ['Animal Bite Vector / Rabies Suspect Exposure', 'Weekly', 18, '+2% Standard System Baseline', 'ok', 'Transportation Access Barriers', 'Negative Indicators Risk'],
+  ['Maternal Danger Signs Notification Stream', 'Immediate', 26, '+1% Standard System Baseline', 'ok', 'Consultation Cost Affordability Caps', 'Negative Indicators Risk'],
+  ['Severe Acute Malnutrition (SAM) Metrics', 'Weekly', 44, '+12% Dynamic Watch Shift', 'watch', 'Socio-Economic Bracket Hardships', 'High Associated Anxiety Markers'],
+  ['Acute Neurological Incidents & Convulsions', 'Immediate', 19, '+6% Standard System Baseline', 'ok', 'Transportation Access Barriers', 'Negative Indicators Risk'],
+  ['Neonatal Tetanus Notification Node', 'Immediate', 2, 'Expected Equilibrium Range', 'ok', 'Low Health Literacy Obstacles', 'Negative Indicators Risk'],
+  ['Unexplained Community Mortality / Death Clusters', 'Immediate', 1, 'Expected Equilibrium Range', 'watch', 'Social Stigma Reticence Concerns', 'Active Family Distress Identifiers'],
+  ['Mental Health Intent Panic/Depressive Crisis', 'Weekly', 382, '+44% High Growth Cluster', 'watch', 'Social Stigma Reticence Concerns', 'Active Suicidal/Self-Harm Signals'],
+  ['Pharmacology/Drug Management Query Stream', 'Weekly', 912, '+18% Heavy System Traffic', 'ok', 'Medication Affordability Caps', 'Negative Indicators Risk']
+];
+
+const escalationStylesMap = { ok: 'status-ok', watch: 'status-watch', alert: 'status-alert' };
+const escalationLabelsMap = { ok: '✓ Active Normal', watch: '⚑ Active Monitor', alert: '⚠ Outbreak Signal' };
+
+function buildWatchlistTable(filterTier = 'all') {
+  const tableBody = document.getElementById('comprehensiveWatchlistTable');
+  tableBody.innerHTML = '';
+
+  syndromicMasterDataset.forEach(([name, tier, volume, deviation, status, barrier, mentalHealth]) => {
+    // Structural filter evaluation
+    if (filterTier !== 'all' && tier !== filterTier) return;
+
+    // Visual masking rule configuration for sample counts
+    const lowVolumeWarningTag = volume < 5 ? ' <span class="thin-flag">(Low Vol Count — Suppressed in Production Pipelines)</span>' : '';
+    
+    // Injectable row model architecture
+    const rowHTMLSnippet = `
+      <tr>
+        <td><strong>${name}</strong>${lowVolumeWarningTag}</td>
+        <td><span class="chip ${tier === 'Immediate' ? 'imm' : tier === 'Weekly' ? 'wk' : 'mo'}">${tier}</span></td>
+        <td><b>${volume.toLocaleString()}</b></td>
+        <td>${deviation}</td>
+        <td class="${escalationStylesMap[status]}">${escalationLabelsMap[status]}</td>
+        <td><span class="p-badge info">${barrier}</span></td>
+        <td><span class="p-badge ${mentalHealth.includes('Suicidal') || mentalHealth.includes('Crisis') ? 'danger' : 'info'}">${mentalHealth}</span></td>
+      </tr>
+    `;
+    tableBody.insertAdjacentHTML('beforeend', rowHTMLSnippet);
+  });
+}
+
+// ---- INTERACTIVE PIPELINE CORE INITIALIZATION ----
+document.addEventListener('DOMContentLoaded', () => {
+  // Execute primary default data visualization renders
+  renderSurveillanceChart('cholera');
+  buildWatchlistTable('all');
+
+  // Wire up configuration changes across filtering components
+  document.querySelectorAll('.pill').forEach(pillElement => {
+    pillElement.addEventListener('click', () => {
+      document.querySelectorAll('.pill').forEach(element => element.classList.remove('active'));
+      pillElement.classList.add('active');
+      
+      const targetedClassificationTier = pillElement.getAttribute('data-tier');
+      buildWatchlistTable(targetedClassificationTier);
+    });
+  });
+
+  // Geographic dropdown listener adjustments for data shifts
+  document.getElementById('geo').addEventListener('change', (event) => {
+    const activeSelectedRegion = event.target.value;
+    const incomingInteractionsMetric = document.getElementById('kpi-interactions');
+    const activeAnomaliesMetric = document.getElementById('kpi-anomalies');
+    
+    if (activeSelectedRegion === 'Borno') {
+      incomingInteractionsMetric.textContent = '1,240';
+      activeAnomaliesMetric.textContent = '1';
+      switchSurveillanceTarget('cholera');
+    } else if (activeSelectedRegion === 'Kano') {
+      incomingInteractionsMetric.textContent = '1,410';
+      activeAnomaliesMetric.textContent = '1';
+      switchSurveillanceTarget('measles');
+    } else if (activeSelectedRegion === 'Kaduna') {
+      incomingInteractionsMetric.textContent = '680';
+      activeAnomaliesMetric.textContent = '1';
+      switchSurveillanceTarget('csm');
+    } else {
+      incomingInteractionsMetric.textContent = '4,812';
+      activeAnomaliesMetric.textContent = '3';
+      switchSurveillanceTarget('cholera');
+    }
+  });
+});
+</script>
+</body>
+</html>

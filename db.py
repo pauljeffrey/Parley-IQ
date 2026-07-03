@@ -174,6 +174,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
         CREATE TABLE IF NOT EXISTS {qualified} (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
             session_id VARCHAR(255),
+            user_id VARCHAR(255),
             user_phone VARCHAR(255),
             model_name VARCHAR(255),
             segment_index INT,
@@ -209,6 +210,7 @@ def create_analysis_table_if_not_exists(engine: Engine) -> None:
         CREATE TABLE IF NOT EXISTS {qualified} (
             id BIGSERIAL PRIMARY KEY,
             session_id TEXT,
+            user_id TEXT,
             user_phone TEXT,
             model_name TEXT,
             segment_index INT,
@@ -262,6 +264,11 @@ def _ensure_analysis_extra_columns(conn: Any, qualified: str, dialect: str) -> N
             )
         except Exception:
             pass
+    text_type = "VARCHAR(255)" if dialect == "mysql" else "TEXT"
+    try:
+        conn.execute(text(f"ALTER TABLE {qualified} ADD COLUMN user_id {text_type} NULL"))
+    except Exception:
+        pass
 
 
 def _select_columns_sql() -> str:
@@ -572,6 +579,7 @@ def fetch_analysis_segments_matching_suspected(
 def _analysis_insert_params(
     *,
     session_id: int | str,
+    user_id: str,
     user_phone: str,
     model_name: str,
     analysis: ConversationAnalysis,
@@ -595,6 +603,7 @@ def _analysis_insert_params(
     for i, segment in enumerate(segments):
         row: dict[str, Any] = {
             "session_id": session_id,
+            "user_id": user_id,
             "user_phone": user_phone,
             "model_name": model_name,
             "segment_index": i + 1,
@@ -637,6 +646,7 @@ def insert_conversation_analysis(
     model_name: str,
     analysis: ConversationAnalysis,
     *,
+    user_id: str | None = None,
     engine: Optional[Engine] = None,
     created_at: Optional[datetime] = None,
     conversation_started: Optional[datetime] = None,
@@ -653,6 +663,7 @@ def insert_conversation_analysis(
         created_at = created_at or datetime.now(timezone.utc)
         params_list = _analysis_insert_params(
             session_id=session_id,
+            user_id=user_id or user_phone,
             user_phone=user_phone,
             model_name=model_name,
             analysis=analysis,
@@ -665,7 +676,7 @@ def insert_conversation_analysis(
         q = text(
             f"""
             INSERT INTO {tbl} (
-                session_id, user_phone, model_name, segment_index,
+                session_id, user_id, user_phone, model_name, segment_index,
                 clinical_category, intent, pharmacology_profiles, mental_health_profiles,
                 suspected_condition, symptoms_reported, urgency_level, barriers, cultural_tags,
                 outcome_referral, visit_followup, literacy_score, cultural_notes, topics_enquired, diseases_enquired,
@@ -673,7 +684,7 @@ def insert_conversation_analysis(
                 created_at, analysis_timestamp,
                 conversation_day_of_week, conversation_month, conversation_year
             ) VALUES (
-                :session_id, :user_phone, :model_name, :segment_index,
+                :session_id, :user_id, :user_phone, :model_name, :segment_index,
                 :clinical_category, :intent, :pharmacology_profiles, :mental_health_profiles,
                 :suspected_condition, :symptoms_reported, :urgency_level, :barriers, :cultural_tags,
                 :outcome_referral, :visit_followup, :literacy_score, :cultural_notes, :topics_enquired, :diseases_enquired,

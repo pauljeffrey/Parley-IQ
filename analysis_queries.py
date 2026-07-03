@@ -63,7 +63,8 @@ class ColumnSpec(NamedTuple):
 ANALYSIS_COLUMN_SPECS: tuple[ColumnSpec, ...] = (
     ColumnSpec("id", "BIGINT", "Optional surrogate primary key."),
     ColumnSpec("session_id", "BIGINT", "Source conversation session identifier."),
-    ColumnSpec("user_phone", "TEXT", "Caller / user phone or external id."),
+    ColumnSpec("user_id", "TEXT", "User identifier from the source conversation table."),
+    ColumnSpec("user_phone", "TEXT", "Contact number when applicable (e.g. WhatsApp); may match user_id."),
     ColumnSpec("model_name", "TEXT", "LLM model name used during extraction."),
     ColumnSpec(
         "segment_index",

@@ -1,4 +1,4 @@
-from datetime import datetime
+# from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
@@ -21,6 +21,7 @@ class ClinicalTaxonomy(Enum):
     CHRONIC_DISEASES = "Chronic Diseases"
     SOCIAL_DETERMINANTS = "Social Determinants (SDoH)"
     EMERGENCY = "Emergency"
+    EPIDEMIC = "Epidemic"
 
 class FunctionalIntent(Enum):
     SYMPTOM_TRIAGE = "Symptom Triage"
@@ -307,7 +308,7 @@ class DrugClass(Enum):
     VITAMIN_MINERAL = "Vitamin / Mineral / Supplement"
     
     # --- Catch-all ---
-    OTHER = "Other"
+    OTHER = "Others"
 
 class Immunization(BaseModel):
     vaccine: str = Field(..., description="Standardized vaccine name.")
@@ -391,6 +392,7 @@ class AnalysisSegment(BaseModel):
         "", description="Standardized condition Name (According to ICD-11) in descending order of likelihood (max 3 conditions). Don't add the icd code."
     )
     symptoms_reported: Optional[List[SymptomNature]] = Field(default_factory=list)
+    symtoms_tier: Literal["Immediate", "Weekly", "Monthly"] = Field(..., description="Tier of syndrome (collection of symptoms) reported by the user (Immediate: symptoms must be reported within 24 hours e.g lassa fever, cholera, polio; Weekly: symptoms must be reported within 1 week e.g malnutrition, rabies, dysentery; Monthly: symptoms must be reported within 1 month).")
     urgency_level: Optional[UrgencyLevel] = None
     barriers: List[SDoHBarrier] = Field(default_factory=list)
     cultural_tags: Optional[CulturalTag] = None
@@ -447,6 +449,9 @@ class ConversationAnalysis(BaseModel):
     )
     diseases_enquired: List[str] = Field(
         default_factory=list, description="Diseases the user inquired about."
+    )
+    languages_used: Literal[str] = Field(
+        default_factory=list, description="Languages (full name) the user spoke in."
     )
 
     @classmethod
